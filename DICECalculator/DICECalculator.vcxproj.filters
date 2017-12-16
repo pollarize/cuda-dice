@@ -1,0 +1,63 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CudaCompile Include="kernel.cu" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Models">
+      <UniqueIdentifier>{52d7f840-2993-455d-8917-4c420b4b1f4e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Models\SwatchBeats">
+      <UniqueIdentifier>{aa33ba7c-daf1-4303-b6c6-fb6219bd1ae9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Models\SHA3-512">
+      <UniqueIdentifier>{481d93fc-e86c-4f0c-bf64-2df27f3e9aa0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Models\RandomGen">
+      <UniqueIdentifier>{4ed1ec8f-4221-4c83-8a73-857fad53d67e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Models\Validation">
+      <UniqueIdentifier>{1a52734a-3f48-4647-9ac0-7980e2eb9db5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Models\DiceCalculation">
+      <UniqueIdentifier>{30df9e42-3ec4-4ebb-b6b8-88d5538df26a}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="SwatcBeats_C.cpp">
+      <Filter>Models\SwatchBeats</Filter>
+    </ClCompile>
+    <ClCompile Include="RandomGen.cpp">
+      <Filter>Models\RandomGen</Filter>
+    </ClCompile>
+    <ClCompile Include="sha3.cpp">
+      <Filter>Models\SHA3-512</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="SwatcBeats_C.h">
+      <Filter>Models\SwatchBeats</Filter>
+    </ClInclude>
+    <ClInclude Include="sha3.h">
+      <Filter>Models\SHA3-512</Filter>
+    </ClInclude>
+    <ClInclude Include="RandomGen.h">
+      <Filter>Models\RandomGen</Filter>
+    </ClInclude>
+    <ClInclude Include="sha3Cuda.cuh">
+      <Filter>Models\SHA3-512</Filter>
+    </ClInclude>
+    <ClInclude Include="SwatchCuda.cuh">
+      <Filter>Models\SwatchBeats</Filter>
+    </ClInclude>
+    <ClInclude Include="RandomGenCuda.cuh">
+      <Filter>Models\RandomGen</Filter>
+    </ClInclude>
+    <ClInclude Include="ValidationCuda.cuh">
+      <Filter>Models\Validation</Filter>
+    </ClInclude>
+    <ClInclude Include="DiceCalcCuda.cuh">
+      <Filter>Models\DiceCalculation</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>
