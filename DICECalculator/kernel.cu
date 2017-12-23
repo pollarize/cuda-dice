@@ -17,10 +17,14 @@ using namespace std;
 #define cNumberOfBlocks           (1536)
 #define cNumberOfThreadsPerBlock  (256)
 #define cSizeOfDataPerThread      (128)
+#define cNumberOfThreads          (cNumberOfBlocks*cNumberOfThreadsPerBlock)
 
-#define cNumberOfThreads      (cNumberOfBlocks*cNumberOfThreadsPerBlock)
-#define cAddressSize          (20)
-#define cStringArrayMax       ((uint16_t)1024)
+#ifndef STATUS
+#define CUDA_E_OK                 ((uint8_t)0)
+#define CUDA_NOT_OK               ((uint8_t)1)
+#define CUDA_PENDING_OK           ((uint8_t)2)
+#endif
+
 
 #define mPRINT_TIME(func)                                                        \
 	auto startTimer = chrono::steady_clock::now();                               \
@@ -64,6 +68,7 @@ typedef enum ProgramStates {
 
 	//Prepare to exit
 	eProgram_CUDA_Cpy_Device_Memory,
+	eProgram_Host_Prepare_Check_Unit,
 	eProgram_CUDA_Clean_Device_Memory,
 	eProgram_Exit,
 
@@ -74,8 +79,8 @@ typedef enum ProgramStates {
 // Local Function Protorypes
 //###############################################################################################################################
 
-void hexstr_to_char(const char* hexstr, uint8_t* bufOut, uint8_t size);
-static uint8_t* char_to_hexstr(uint8_t* pCharArrayP, uint8_t u8CountOfBytesP, uint8_t* bufOut);
+//void hexstr_to_char(const char* hexstr, uint8_t* bufOut, uint8_t size);
+//static uint8_t* char_to_hexstr(uint8_t* pCharArrayP, uint8_t u8CountOfBytesP, uint8_t* bufOut);
 static void DisplayHeader(void);
 
 //###############################################################################################################################
@@ -120,15 +125,16 @@ int main(int argc, char* argv[])
 	//Stub for constant input from console
 	const char* addrOp = "03037a1e2905d3bf34b31f61efcb0960ef512809";
 	const char* addrMin = "0204c09f6117454ab573bd166fbef7c1e4832c1f";
-	const char* zeroes = "18";
+	const char* zeroes = "12";
 
 	//Set default Proto
 	diceProtoHEX_t dProto;
 	payload_t buf_PayloadL;
+	int bIsEqualL;
 
 	//Get zeroes from string
 	uint8_t aZerosL[1];
-	hexstr_to_char(zeroes, aZerosL, 1);
+	hexstr_to_char((uint8_t*)zeroes, aZerosL, 1);
 
 	//Show data from GPU on console
 	DisplayHeader();
@@ -183,7 +189,7 @@ int main(int argc, char* argv[])
 		case eProgram_CUDA_Cpy_Host_Memory:
 			//Get seed Time
 			getBeats(aU8Time);
-			
+
 			// Copy output vector from GPU buffer to host memory.
 			cudaStatus = cudaMemcpy(pD_U8Time, aU8Time, sizeof(uint32_t), cudaMemcpyHostToDevice);
 			cudaStatus = cudaMemcpy(pD_U16Zeroes, aZerosL, sizeof(uint8_t), cudaMemcpyHostToDevice);
@@ -198,7 +204,7 @@ int main(int argc, char* argv[])
 			//Init data in GPU with one CPU
 			for (size_t i = 0; i < cNumberOfThreads; i++)
 			{
-				memcpy(h_Protos, &dProto, 109*2);
+				memcpy(&h_Protos[i], &dProto, 109 * 2);
 			}
 
 			cudaStatus = cudaMemcpy(pD_Protos, &h_Protos, sizeof(h_Protos), cudaMemcpyHostToDevice);
@@ -437,15 +443,59 @@ int main(int argc, char* argv[])
 			break;
 
 
-	//Prepare to exit
+			//Prepare to exit
 		case eProgram_CUDA_Cpy_Device_Memory:
 			cudaStatus = cudaMemcpy(buf_PayloadL.payload, pD_Payloads[sValidDiceUnitIdx].payload, sizeof(payload_t), cudaMemcpyDeviceToHost);
-			char_to_hexstr(buf_PayloadL.payload, sizeof(payload_t), diceUnitValid.payload);
-
-			if (cudaStatus != cudaSuccess) {
+			if (cudaStatus != cudaSuccess) 
+			{
 				fprintf(stderr, "cudaMemcpy failed!");
+				PStates = eProgram_CUDA_Clean_Device_Memory;
 			}
-			PStates = eProgram_CUDA_Clean_Device_Memory;
+			else
+			{
+				PStates = eProgram_Host_Prepare_Check_Unit;
+			}
+			break;
+
+		case eProgram_Host_Prepare_Check_Unit:
+			//Set Up Dice Unit
+			memcpy(diceUnitValid.addrOp, dProto.addrOp, 20 * 2);
+			memcpy(diceUnitValid.addrMin, dProto.addrMin, 20 * 2);
+			memcpy(diceUnitValid.validZeroes, dProto.validZeroes, 1 * 2);
+			dCUDA_Char_To_HexStr(aU8Time, 4, diceUnitValid.swatchTime);
+			dCUDA_Char_To_HexStr(buf_PayloadL.payload, sizeof(payload_t), diceUnitValid.payload);
+
+			
+			//Check Hash of proto is as expected
+			//Hash Random
+			uint8_t aShaReturnL[64];
+			sha3_SingleExeuction(diceUnitValid.payload, 83 * 2, aShaReturnL);
+
+			//Save data to Global Memory in HexString
+			dCUDA_Char_To_HexStr(aShaReturnL, 64, dProto.shaPayload);
+
+			//Set Time in Global Memory for each Proto
+			memcpy(dProto.swatchTime, diceUnitValid.swatchTime, 4 * 2);
+
+			//Hash Random
+			sha3_SingleExeuction(&dProto, 109 * 2, aShaReturnL);
+
+			//Save data to Global Memory in HexString 
+			uint8_t aShaHexReturnL[128];
+			dCUDA_Char_To_HexStr(aShaReturnL, 64, aShaHexReturnL);
+
+			//Check is the hash value is as expected
+			bIsEqualL = memcmp(aShaHexReturnL, h_ProtosShaHex[sValidDiceUnitIdx].hashProto, 128);
+
+			if (CUDA_E_OK == bIsEqualL)
+			{
+				PStates = eProgram_CUDA_Clean_Device_Memory;
+			}
+			else
+			{
+				PStates = eProgram_Loop_CUDA_Fill_Random;
+			}
+
 			break;
 
 		case eProgram_CUDA_Clean_Device_Memory:
@@ -518,32 +568,32 @@ static void DisplayHeader()
 
 }
 
-static void hexstr_to_char(const char* hexstr, uint8_t* bufOut, uint8_t size)
-{
-	size_t len = strlen(hexstr);
-
-	if (len % 2 == 0)
-	{
-		for (size_t i = 0, j = 0; j < size; i += 2, j++)
-		{
-			bufOut[j] = (hexstr[i] % 32 + 9) % 25 * 16 + (hexstr[i + 1] % 32 + 9) % 25;
-		}
-	}
-	else
-	{
-		//Nothing
-	}
-}
-
-static uint8_t* char_to_hexstr(uint8_t* pCharArrayP, uint8_t u8CountOfBytesP, uint8_t* bufOut)
-{
-	//Convert char array to hex string
-	for (size_t i = 0; i < u8CountOfBytesP; i++)
-	{
-		sprintf((char*)&bufOut[i * 2], "%02x", pCharArrayP[i]);
-	}
-	return (uint8_t*)bufOut;
-}
+//static void hexstr_to_char(const char* hexstr, uint8_t* bufOut, uint8_t size)
+//{
+//	size_t len = strlen(hexstr);
+//
+//	if (len % 2 == 0)
+//	{
+//		for (size_t i = 0, j = 0; j < size; i += 2, j++)
+//		{
+//			bufOut[j] = (hexstr[i] % 32 + 9) % 25 * 16 + (hexstr[i + 1] % 32 + 9) % 25;
+//		}
+//	}
+//	else
+//	{
+//		//Nothing
+//	}
+//}
+//
+//static uint8_t* char_to_hexstr(uint8_t* pCharArrayP, uint8_t u8CountOfBytesP, uint8_t* bufOut)
+//{
+//	//Convert char array to hex string
+//	for (size_t i = 0; i < u8CountOfBytesP; i++)
+//	{
+//		sprintf((char*)&bufOut[i * 2], "%02x", pCharArrayP[i]);
+//	}
+//	return (uint8_t*)bufOut;
+//}
 
 
 //###############################################################################################################################

@@ -14,8 +14,8 @@
 #error "There is not defined count of used threads!"
 #endif
 
-static __device__ uint8_t* dCUDA_Char_To_HexStr(uint8_t* pCharArrayP, uint8_t u8CountOfBytesP, uint8_t* bufOut);
-static __device__  void hexstr_to_char(uint8_t* hexstr, uint8_t* bufOut, uint8_t size);
+ __device__ __host__ uint8_t* dCUDA_Char_To_HexStr(uint8_t* pCharArrayP, uint8_t u8CountOfBytesP, uint8_t* bufOut);
+ __device__ __host__ void hexstr_to_char(uint8_t* hexstr, uint8_t* bufOut, uint8_t size);
 
 __global__ void gCUDA_SHA3_Random(payload_t* bufIn, diceProtoHEX_t* bufOut)
 {
@@ -65,7 +65,7 @@ __global__ void gCUDA_ValidateProtoHash(hashProtoHex_t* bufIn, uint16_t* zeroes 
 	}
 }
 
-static __device__  void hexstr_to_char(uint8_t* hexstr, uint8_t* bufOut, uint8_t size)
+ __device__ __host__ void hexstr_to_char(uint8_t* hexstr, uint8_t* bufOut, uint8_t size)
 {
 	for (size_t i = 0, j = 0; j < size; i += 2, j++)
 	{
@@ -73,17 +73,7 @@ static __device__  void hexstr_to_char(uint8_t* hexstr, uint8_t* bufOut, uint8_t
 	}
 }
 
-static __host__ uint8_t* char_to_hexstr_SHA(uint8_t* pCharArrayP, uint8_t u8CountOfBytesP, uint8_t* bufOut)
-{
-	//Convert char array to hex string
-	for (size_t i = 0; i < u8CountOfBytesP; i++)
-	{
-		sprintf((char*)&bufOut[i * 2], "%02x", pCharArrayP[i]);
-	}
-	return (uint8_t*)bufOut;
-}
-
-static __device__ __host__ uint8_t* dCUDA_Char_To_HexStr(uint8_t* pCharArrayP, uint8_t u8CountOfBytesP, uint8_t* bufOut)
+ __device__ __host__ uint8_t* dCUDA_Char_To_HexStr(uint8_t* pCharArrayP, uint8_t u8CountOfBytesP, uint8_t* bufOut)
 {
 	const char* aHexL = "0123456789abcdef";
 	for (size_t i = 0; i < u8CountOfBytesP; i++)
