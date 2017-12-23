@@ -4,17 +4,8 @@
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 
-#define SHA3_ASSERT( x )
-#if defined(_MSC_VER)
-#define SHA3_TRACE( format, ...)
-#define SHA3_TRACE_BUF( format, buf, l, ...)
-#else
-#define SHA3_TRACE(format, args...)
-#define SHA3_TRACE_BUF(format, buf, l, args...)
-#endif
+#define SHA3_512_SIZE  (uint8_t((512/8)))
 
-__device__ __host__ void keccakf(uint64_t s[25])
-{
 #if defined(_MSC_VER)
 #define SHA3_CONST(x) x
 #else
@@ -26,6 +17,22 @@ __device__ __host__ void keccakf(uint64_t s[25])
 	(((x) << (y)) | ((x) >> ((sizeof(uint64_t)*8) - (y))))
 #endif
 
+#define SHA3_ASSERT( x )
+#if defined(_MSC_VER)
+#define SHA3_TRACE( format, ...)
+#define SHA3_TRACE_BUF( format, buf, l, ...)
+#else
+#define SHA3_TRACE(format, args...)
+#define SHA3_TRACE_BUF(format, buf, l, args...)
+#endif
+
+/* 'Words' here refers to uint64_t */
+#define SHA3_KECCAK_SPONGE_WORDS \
+	(((1600)/8/*bits to byte*/)/sizeof(uint64_t))
+
+
+__device__ __host__ void keccakf(uint64_t s[25])
+{
 	 const uint64_t keccakf_rndc[24] = {
 		SHA3_CONST(0x0000000000000001UL), SHA3_CONST(0x0000000000008082UL),
 		SHA3_CONST(0x800000000000808aUL), SHA3_CONST(0x8000000080008000UL),
@@ -94,12 +101,6 @@ __device__ __host__ void keccakf(uint64_t s[25])
 /* *************************** Public Inteface ************************ */
 __device__ __host__ void sha3_SingleExeuction(void const *bufIn, size_t len, uint8_t* bufOut)
 {
-#define SHA3_512  (uint8_t(512/8))
-
-	/* 'Words' here refers to uint64_t */
-#define SHA3_KECCAK_SPONGE_WORDS \
-	(((1600)/8/*bits to byte*/)/sizeof(uint64_t))
-
 	struct  sha3_context {
 		uint64_t saved;             /* the portion of the input message that we
 									* didn't consume yet */
@@ -251,5 +252,5 @@ __device__ __host__ void sha3_SingleExeuction(void const *bufIn, size_t len, uin
 	SHA3_TRACE_BUF("Hash: (first 32 bytes)", constexL.sb, 256 / 8);
 
 	//Copy data from local buffer
-	memcpy(bufOut, constexL.sb, SHA3_512);
+	memcpy(bufOut, constexL.sb, SHA3_512_SIZE);
 }

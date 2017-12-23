@@ -2,223 +2,485 @@
 #include "device_launch_parameters.h"
 #include <iostream>
 #include <stdio.h> 
+#include <string>
 #include <time.h>
 #include <chrono>
-
-/*User libraries for CUDA*/
-#include "sha3Cuda.cuh"
-#include "SwatchCuda.cuh"
-#include "RandomGenCuda.cuh"
-#include "ValidationCuda.cuh"
-#include "DiceCalcCuda.cuh"
-
-//Local defines
-#define cArraySize   (1024*1024)
-#define cAddressSize (20)
-
-typedef struct hashing
-{
-	bool isValid;
-	uint8_t buffer[SHA3_512];
-}hasinig_t;
+#include <iostream>       
+#include <thread>         
 
 using namespace std;
 
-//Local Function prototypes
-cudaError_t hashWithCuda(hasinig_t *c, unsigned int size);
-cudaError_t randWithCuda(payload_t *c, unsigned int size);
+//###############################################################################################################################
+// Local Defines
+//###############################################################################################################################
+
+#define cNumberOfBlocks           (1536)
+#define cNumberOfThreadsPerBlock  (256)
+#define cSizeOfDataPerThread      (128)
+
+#define cNumberOfThreads      (cNumberOfBlocks*cNumberOfThreadsPerBlock)
+#define cAddressSize          (20)
+#define cStringArrayMax       ((uint16_t)1024)
+
+#define mPRINT_TIME(func)                                                        \
+	auto startTimer = chrono::steady_clock::now();                               \
+	func;                                                                        \
+	auto endTimer = chrono::steady_clock::now();                                 \
+	cout << "Elapsed time in milliseconds : "                                    \
+	<< chrono::duration_cast<chrono::milliseconds>(endTimer - startTimer).count()\
+	<< " ms" << endl;
+
+//###############################################################################################################################
+// External Libs for CUDA 
+//###############################################################################################################################
+/*User libraries for CUDA*/
+#include "DiceCalcCudaTypes.cuh"
+#include "sha3Cuda.cuh"
+#include "SwatchCuda.cuh"
+#include "ValidationCuda.cuh"
+#include "RandomGenCuda.cuh"
+#include "DiceCudaCalculation.cuh"
+
+//###############################################################################################################################
+// Local Types
+//###############################################################################################################################
+
+typedef enum ProgramStates {
+
+	//Prepare Program execution
+	eProgram_Init,
+	eProgram_Get_Console_Options,
+	eProgram_CUDA_Allocate_Memory,
+	eProgram_CUDA_Cpy_Host_Memory,
+	eProgram_CUDA_CURAND_Init,
+
+	//Loop states
+	eProgram_Loop_CUDA_Fill_Random,
+	eProgram_Loop_CUDA_SHA3_Random,
+	eProgram_Loop_Host_Time,
+	eProgram_Loop_CUDA_SHA3_DICE_Proto,
+	eProgram_Loop_CUDA_Validate,
+	eProgram_Loop_Host_Validate,
+
+	//Prepare to exit
+	eProgram_CUDA_Cpy_Device_Memory,
+	eProgram_CUDA_Clean_Device_Memory,
+	eProgram_Exit,
+
+	eProgram_Count,
+}EprogramStates_t;
+
+//###############################################################################################################################
+// Local Function Protorypes
+//###############################################################################################################################
 
 void hexstr_to_char(const char* hexstr, uint8_t* bufOut, uint8_t size);
+static uint8_t* char_to_hexstr(uint8_t* pCharArrayP, uint8_t u8CountOfBytesP, uint8_t* bufOut);
+static void DisplayHeader(void);
 
-static void DisplayHeader();
-//static void calcSHA3(void);
+//###############################################################################################################################
+// Local Data
+//###############################################################################################################################
 
-//Local data
-cudaDeviceProp props;
-static hasinig_t c[cArraySize];
-static payload_t diceUnits[cArraySize];
+//Host-CPU
+static cudaDeviceProp props;
+static cudaError_t cudaStatus;
+static EprogramStates_t PStates = eProgram_Init;
+static bool bIsProgramRunning = true;
+static uint8_t aU8Time[sizeof(uint32_t)];
+auto startTimer = chrono::steady_clock::now();
+auto endTimer = chrono::steady_clock::now();
+static size_t sValidDiceUnitIdx = 0;
+static diceUnitHex_t diceUnitValid;
 
-//Function Executed on GPU
-__global__ void  calculateDICE(hasinig_t *c)
-{
-	int i = (blockDim.x*blockIdx.x) + threadIdx.x;
+//Device-GPU
+static payload_t* pD_Payloads = 0;
+static uint8_t* pD_U8Time = 0;
+static diceProtoHEX_t* pD_Protos = 0;
+static hashProtoHex_t* pD_ProtosShaHex = 0;
+static bool* pD_ValidatingRes = 0;
+static uint16_t* pD_U16Zeroes = 0;
 
-	sha3_SingleExeuction("Hello World", 12, c[i].buffer);
+//Copy on Host
+static payload_t h_Payloads[cNumberOfThreads];
+static diceProtoHEX_t h_Protos[cNumberOfThreads];
+static hashProtoHex_t h_ProtosShaHex[cNumberOfThreads];
+static bool h_ValidatingRes[cNumberOfThreads];
+static uint16_t h_U16Zeroes;
 
-	c[i].isValid = true;
-}
-
-__global__ void cudaRandPayload(payload_t *d_out)
-{
-	int i = (blockDim.x*blockIdx.x) + threadIdx.x;
-	getPayloadCuda(d_out[i].payload, cPayloadSize);
-}
+//###############################################################################################################################
+// Local Functions
+//###############################################################################################################################
 
 int main(int argc, char* argv[])
 {
 	cudaGetDeviceProperties(&props, 0);
 	cudaSetDeviceFlags(cudaDeviceScheduleYield | cudaDeviceMapHost | cudaDeviceLmemResizeToMax);
-	const int size = cArraySize;
 
-	//In HEX
+	//Stub for constant input from console
 	const char* addrOp = "03037a1e2905d3bf34b31f61efcb0960ef512809";
 	const char* addrMin = "0204c09f6117454ab573bd166fbef7c1e4832c1f";
-	const char* zeroes = "13";
+	const char* zeroes = "18";
 
-	uint8_t Array[cAddressSize];
+	//Set default Proto
+	diceProtoHEX_t dProto;
+	payload_t buf_PayloadL;
 
-	hexstr_to_char(addrOp, Array, cAddressSize);
-	hexstr_to_char(addrMin, Array, cAddressSize);
-	hexstr_to_char(zeroes, Array, 1);
+	//Get zeroes from string
+	uint8_t aZerosL[1];
+	hexstr_to_char(zeroes, aZerosL, 1);
 
+	//Show data from GPU on console
 	DisplayHeader();
 
-	memset(c, 0, size);
+	while (bIsProgramRunning)
+	{
+		switch (PStates)
+		{
+		case eProgram_Init:
+			cudaDeviceReset();
+			cudaThreadExit();
+			//Set current GPU Card (zero by Default for single GPU on system)
+			cudaStatus = cudaSetDevice(0);
 
-	auto startTimer = chrono::steady_clock::now();
-    cudaError_t cudaStatus = hashWithCuda(c, size);
-	auto endTimer = chrono::steady_clock::now();
+			//Check for Errors
+			if (cudaStatus != cudaSuccess)
+			{
+				fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
+				PStates = eProgram_CUDA_Clean_Device_Memory;
+			}
+			else
+			{
+				PStates = eProgram_Get_Console_Options;
+			}
+			break;
 
-	wcout << endl << c << endl;
+		case eProgram_Get_Console_Options:
+			PStates = eProgram_CUDA_Allocate_Memory;
+			break;
 
-	cout << "Threads per second : "
-		<< (cArraySize/chrono::duration_cast<chrono::milliseconds>(endTimer - startTimer).count())*1000
-		<<  endl;
+		case eProgram_CUDA_Allocate_Memory:
+			//Allocate memory on GPU
+			cudaStatus = cudaMalloc((void**)&pD_Payloads, cNumberOfThreads * sizeof(payload_t));
+			cudaStatus = cudaMalloc((void**)&pD_Protos, cNumberOfThreads * sizeof(diceProtoHEX_t));
+			cudaStatus = cudaMalloc((void**)&pD_U8Time, sizeof(uint32_t));
+			cudaStatus = cudaMalloc((void**)&pD_ProtosShaHex, cNumberOfThreads * sizeof(hashProtoHex_t));
+			cudaStatus = cudaMalloc((void**)&pD_ValidatingRes, cNumberOfThreads * sizeof(bool));
+			cudaStatus = cudaMalloc((void**)&pD_U16Zeroes, sizeof(uint16_t));
 
-	cout << "Elapsed time in milliseconds : "
-		<< chrono::duration_cast<chrono::milliseconds>(endTimer - startTimer).count()
-		<< " ms" << endl;
+			//Check for Errors
+			if (cudaStatus != cudaSuccess)
+			{
+				fprintf(stderr, "cudaMalloc failed on Payload!");
+				PStates = eProgram_CUDA_Clean_Device_Memory;
+			}
+			else
+			{
+				PStates = eProgram_CUDA_Cpy_Host_Memory;
+			}
+			break;
 
-	startTimer = chrono::steady_clock::now();
-	////for (size_t i = 0; i < props.maxThreadsDim[0]* props.maxThreadsDim[1]; i++)
-	////{
-	////	uint8_t bufferL[SHA3_512];
-	////	sha3_SingleExeuction("Hello World", 12, bufferL);
-	////}
-	//for (int i = 0; i < cArraySize; i++)
-	//{
-	//	getPayload(diceUnits[i].payload, cPayloadSize);
-	//}
-	cudaStatus = randWithCuda(diceUnits, size);
+		case eProgram_CUDA_Cpy_Host_Memory:
+			//Get seed Time
+			getBeats(aU8Time);
+			
+			// Copy output vector from GPU buffer to host memory.
+			cudaStatus = cudaMemcpy(pD_U8Time, aU8Time, sizeof(uint32_t), cudaMemcpyHostToDevice);
+			cudaStatus = cudaMemcpy(pD_U16Zeroes, aZerosL, sizeof(uint8_t), cudaMemcpyHostToDevice);
 
-	endTimer = chrono::steady_clock::now();
+			//Set const value
+			memcpy(dProto.addrMin, addrMin, 20 * 2);
+			memcpy(dProto.addrOp, addrOp, 20 * 2);
+			memcpy(dProto.validZeroes, zeroes, 1 * 2);
+			memset(dProto.swatchTime, 1, 4 * 2);
+			memset(dProto.shaPayload, 1, 64 * 2);
 
-	cout << "Elapsed time in nanoseconds : "
-		<< chrono::duration_cast<chrono::milliseconds>(endTimer - startTimer).count()
-		<< " ms" << endl;
+			//Init data in GPU with one CPU
+			for (size_t i = 0; i < cNumberOfThreads; i++)
+			{
+				memcpy(h_Protos, &dProto, 109*2);
+			}
 
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "addWithCuda failed!");
-        return 1;
-    }
+			cudaStatus = cudaMemcpy(pD_Protos, &h_Protos, sizeof(h_Protos), cudaMemcpyHostToDevice);
 
-    // cudaDeviceReset must be called before exiting in order for profiling and
-    // tracing tools such as Nsight and Visual Profiler to show complete traces.
-    cudaStatus = cudaDeviceReset();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaDeviceReset failed!");
-        return 1;
-    }
+			if (cudaStatus != cudaSuccess)
+			{
+				fprintf(stderr, "cudaMemcpy failed!");
+				PStates = eProgram_CUDA_Clean_Device_Memory;
+			}
+			else
+			{
+				PStates = eProgram_CUDA_CURAND_Init;
+			}
+			break;
 
-    return 0;
+		case eProgram_CUDA_CURAND_Init:
+			// Launch a kernel on the GPU with one thread for each element.
+			gCUDA_CURAND_Init << < cNumberOfBlocks, cNumberOfThreadsPerBlock, cSizeOfDataPerThread >> > (pD_U8Time);
+
+			// Check for any errors launching the kernel
+			cudaStatus = cudaGetLastError();
+			if (cudaStatus != cudaSuccess)
+			{
+				fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
+				PStates = eProgram_CUDA_Clean_Device_Memory;
+			}
+			else
+			{
+				// cudaDeviceSynchronize waits for the kernel to finish, and returns
+				// any errors encountered during the launch.
+				cudaStatus = cudaDeviceSynchronize();
+				if (cudaStatus != cudaSuccess)
+				{
+					fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
+					PStates = eProgram_CUDA_Clean_Device_Memory;
+				}
+				else
+				{
+					PStates = eProgram_Loop_CUDA_Fill_Random;
+				}
+			}
+			break;
+
+			//Loop states
+		case eProgram_Loop_CUDA_Fill_Random:
+			startTimer = chrono::steady_clock::now();
+
+			// Launch a kernel on the GPU with one thread for each element.
+			gCUDA_Fill_Payload << < cNumberOfBlocks, cNumberOfThreadsPerBlock, cSizeOfDataPerThread >> > (pD_Payloads);
+			// Check for any errors launching the kernel
+			cudaStatus = cudaGetLastError();
+			if (cudaStatus != cudaSuccess)
+			{
+				fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
+				PStates = eProgram_CUDA_Clean_Device_Memory;
+			}
+			else
+			{
+				// cudaDeviceSynchronize waits for the kernel to finish, and returns
+				// any errors encountered during the launch.
+				cudaStatus = cudaDeviceSynchronize();
+				if (cudaStatus != cudaSuccess)
+				{
+					fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
+					PStates = eProgram_CUDA_Clean_Device_Memory;
+				}
+				else
+				{
+					// Copy output vector from GPU buffer to host memory.
+					cudaStatus = cudaMemcpy(h_Payloads, pD_Payloads, cNumberOfThreads * sizeof(payload_t), cudaMemcpyDeviceToHost);
+					if (cudaStatus != cudaSuccess) {
+						fprintf(stderr, "cudaMemcpy failed!");
+						PStates = eProgram_CUDA_Clean_Device_Memory;
+					}
+					PStates = eProgram_Loop_CUDA_SHA3_Random;
+				}
+			}
+			endTimer = chrono::steady_clock::now();
+			/*cout << "Fill RANDOM Elapsed time in milliseconds : "
+				<< chrono::duration_cast<chrono::milliseconds>(endTimer - startTimer).count()
+				<< " ms" << endl;*/
+			break;
+
+		case eProgram_Loop_CUDA_SHA3_Random:
+			startTimer = chrono::steady_clock::now();
+
+			// Launch a kernel on the GPU with one thread for each element.
+			gCUDA_SHA3_Random << < cNumberOfBlocks, cNumberOfThreadsPerBlock >> > (pD_Payloads, pD_Protos);
+
+			// Check for any errors launching the kernel
+			cudaStatus = cudaGetLastError();
+			if (cudaStatus != cudaSuccess)
+			{
+				fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
+				PStates = eProgram_CUDA_Clean_Device_Memory;
+			}
+			else
+			{
+				// cudaDeviceSynchronize waits for the kernel to finish, and returns
+				// any errors encountered during the launch.
+				cudaStatus = cudaDeviceSynchronize();
+				if (cudaStatus != cudaSuccess)
+				{
+					fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
+					PStates = eProgram_CUDA_Clean_Device_Memory;
+				}
+				else
+				{
+					// Copy output vector from GPU buffer to host memory.
+					cudaStatus = cudaMemcpy(h_Protos, pD_Protos, cNumberOfThreads * sizeof(diceProtoHEX_t), cudaMemcpyDeviceToHost);
+					if (cudaStatus != cudaSuccess) {
+						fprintf(stderr, "cudaMemcpy failed!");
+						PStates = eProgram_CUDA_Clean_Device_Memory;
+					}
+					PStates = eProgram_Loop_Host_Time;
+				}
+			}
+			endTimer = chrono::steady_clock::now();
+			/*cout << "SHA3-512 RANDOM Elapsed time in milliseconds : "
+				<< chrono::duration_cast<chrono::milliseconds>(endTimer - startTimer).count()
+				<< " ms" << endl;*/
+			break;
+
+		case eProgram_Loop_Host_Time:
+			//Get seed Time
+			getBeats(aU8Time);
+
+			// Copy output vector from GPU buffer to host memory.
+			cudaStatus = cudaMemcpy(pD_U8Time, aU8Time, sizeof(uint32_t), cudaMemcpyHostToDevice);
+
+			if (cudaStatus != cudaSuccess)
+			{
+				fprintf(stderr, "cudaMemcpy failed!");
+				PStates = eProgram_CUDA_Clean_Device_Memory;
+			}
+			else
+			{
+				PStates = eProgram_Loop_CUDA_SHA3_DICE_Proto;
+			}
+
+			break;
+
+		case eProgram_Loop_CUDA_SHA3_DICE_Proto:
+			startTimer = chrono::steady_clock::now();
+
+			//Launch a kernel on the GPU with one thread for each element.
+			gCUDA_SHA3_Proto << < cNumberOfBlocks, cNumberOfThreadsPerBlock, cSizeOfDataPerThread >> > (pD_Protos, pD_U8Time, pD_ProtosShaHex);
+
+			//Check for any errors launching the kernel
+			cudaStatus = cudaGetLastError();
+			if (cudaStatus != cudaSuccess)
+			{
+				fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
+				PStates = eProgram_CUDA_Clean_Device_Memory;
+			}
+			else
+			{
+				//cudaDeviceSynchronize waits for the kernel to finish, and returns
+				//any errors encountered during the launch.
+				cudaStatus = cudaDeviceSynchronize();
+				if (cudaStatus != cudaSuccess)
+				{
+					fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
+					PStates = eProgram_CUDA_Clean_Device_Memory;
+				}
+				else
+				{
+					//Copy output vector from GPU buffer to host memory.
+					cudaStatus = cudaMemcpy(h_Protos, pD_Protos, cNumberOfThreads * sizeof(diceProtoHEX_t), cudaMemcpyDeviceToHost);
+					cudaStatus = cudaMemcpy(h_ProtosShaHex, pD_ProtosShaHex, cNumberOfThreads * sizeof(hashProtoHex_t), cudaMemcpyDeviceToHost);
+
+					if (cudaStatus != cudaSuccess) {
+						fprintf(stderr, "cudaMemcpy failed!");
+						PStates = eProgram_CUDA_Clean_Device_Memory;
+					}
+					PStates = eProgram_Loop_CUDA_Validate;
+				}
+			}
+			endTimer = chrono::steady_clock::now();
+			/*cout << "SHA3-512 PROTOS Elapsed time in milliseconds : "
+				<< chrono::duration_cast<chrono::milliseconds>(endTimer - startTimer).count()
+				<< " ms" << endl;*/
+			break;
+
+		case eProgram_Loop_CUDA_Validate:
+			startTimer = chrono::steady_clock::now();
+
+			//Launch a kernel on the GPU with one thread for each element.
+			gCUDA_ValidateProtoHash << < cNumberOfBlocks, cNumberOfThreadsPerBlock, cSizeOfDataPerThread >> > (pD_ProtosShaHex, pD_U16Zeroes, pD_ValidatingRes);
+
+			//Check for any errors launching the kernel
+			cudaStatus = cudaGetLastError();
+			if (cudaStatus != cudaSuccess)
+			{
+				fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
+				PStates = eProgram_CUDA_Clean_Device_Memory;
+			}
+			else
+			{
+				//cudaDeviceSynchronize waits for the kernel to finish, and returns
+				//any errors encountered during the launch.
+				cudaStatus = cudaDeviceSynchronize();
+				if (cudaStatus != cudaSuccess)
+				{
+					fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
+					PStates = eProgram_CUDA_Clean_Device_Memory;
+				}
+				else
+				{
+					//Copy output vector from GPU buffer to host memory.
+					cudaStatus = cudaMemcpy(h_ValidatingRes, pD_ValidatingRes, cNumberOfThreads * sizeof(bool), cudaMemcpyDeviceToHost);
+					if (cudaStatus != cudaSuccess) {
+						fprintf(stderr, "cudaMemcpy failed!");
+						PStates = eProgram_CUDA_Clean_Device_Memory;
+					}
+					PStates = eProgram_Loop_Host_Validate;
+				}
+			}
+			endTimer = chrono::steady_clock::now();
+			/*cout << "Validating Elapsed time in milliseconds : "
+				<< chrono::duration_cast<chrono::milliseconds>(endTimer - startTimer).count()
+				<< " ms" << endl;*/
+			break;
+
+		case eProgram_Loop_Host_Validate:
+			PStates = eProgram_Loop_CUDA_Fill_Random;
+			for (size_t i = 0; i < cNumberOfThreads; i++)
+			{
+				if (false == h_ValidatingRes[i])
+				{
+					sValidDiceUnitIdx = i;
+					PStates = eProgram_CUDA_Cpy_Device_Memory;
+					break;
+				}
+			}
+			break;
+
+
+	//Prepare to exit
+		case eProgram_CUDA_Cpy_Device_Memory:
+			cudaStatus = cudaMemcpy(buf_PayloadL.payload, pD_Payloads[sValidDiceUnitIdx].payload, sizeof(payload_t), cudaMemcpyDeviceToHost);
+			char_to_hexstr(buf_PayloadL.payload, sizeof(payload_t), diceUnitValid.payload);
+
+			if (cudaStatus != cudaSuccess) {
+				fprintf(stderr, "cudaMemcpy failed!");
+			}
+			PStates = eProgram_CUDA_Clean_Device_Memory;
+			break;
+
+		case eProgram_CUDA_Clean_Device_Memory:
+			cudaFree(pD_Payloads);
+			cudaFree(pD_Protos);
+			cudaFree(pD_U8Time);
+			cudaFree(pD_ProtosShaHex);
+			cudaFree(pD_ValidatingRes);
+			fprintf(stderr, "Free GPU Memory\n");
+			PStates = eProgram_Exit;
+			break;
+
+		case eProgram_Exit:
+			uint8_t aPrintReadyL[129];
+			memcpy(aPrintReadyL, h_ProtosShaHex[sValidDiceUnitIdx].hashProto, 128);
+			aPrintReadyL[128] = '\0';
+
+			printf("%s\n", aPrintReadyL);
+			bIsProgramRunning = false;
+			break;
+
+		default:
+			bIsProgramRunning = false;
+			fprintf(stderr, "INVALID Program State !!!\n");
+			break;
+		}
+	}
+
+
+	return 0;
 }
 
-// Helper function for using CUDA to add vectors in parallel.
-cudaError_t hashWithCuda(hasinig_t *c, unsigned int size)
-{
-	hasinig_t *dev_c = 0;
-    cudaError_t cudaStatus;
-
-    // Choose which GPU to run on, change this on a multi-GPU system.
-    cudaStatus = cudaSetDevice(0);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
-        goto Error;
-    }
-
-    // Allocate GPU buffers for three vectors (two input, one output)    .
-    cudaStatus = cudaMalloc((void**)&dev_c, size * sizeof(hasinig_t));
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMalloc failed!");
-        goto Error;
-    }
-
-    // Launch a kernel on the GPU with one thread for each element.
-    calculateDICE <<< props.maxThreadsDim[0], props.maxThreadsDim[1], props.maxThreadsDim[2] >>>(dev_c);
-    // Check for any errors launching the kernel
-    cudaStatus = cudaGetLastError();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
-        goto Error;
-    }
-    
-    // cudaDeviceSynchronize waits for the kernel to finish, and returns
-    // any errors encountered during the launch.
-    cudaStatus = cudaDeviceSynchronize();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
-        goto Error;
-    }
-
-    // Copy output vector from GPU buffer to host memory.
-    cudaStatus = cudaMemcpy(c, dev_c, size * sizeof(hasinig_t), cudaMemcpyDeviceToHost);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMemcpy failed!");
-        goto Error;
-    }
-Error:
-    cudaFree(dev_c);
-    
-    return cudaStatus;
-}
-
-cudaError_t randWithCuda(payload_t *c, unsigned int size)
-{
-	payload_t *dev_c = 0;
-	cudaError_t cudaStatus;
-
-	// Choose which GPU to run on, change this on a multi-GPU system.
-	cudaStatus = cudaSetDevice(0);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
-		goto Error;
-	}
-
-	// Allocate GPU buffers for three vectors (two input, one output)    .
-	cudaStatus = cudaMalloc((void**)&dev_c, size * sizeof(payload_t));
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMalloc failed!");
-		goto Error;
-	}
-
-	// Launch a kernel on the GPU with one thread for each element.
-	cudaRandPayload <<< props.maxThreadsDim[0]*6, props.maxThreadsDim[1]/6, props.maxThreadsDim[2] >>>(dev_c);
-	// Check for any errors launching the kernel
-	cudaStatus = cudaGetLastError();
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
-		goto Error;
-	}
-
-	// cudaDeviceSynchronize waits for the kernel to finish, and returns
-	// any errors encountered during the launch.
-	cudaStatus = cudaDeviceSynchronize();
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
-		goto Error;
-	}
-
-	// Copy output vector from GPU buffer to host memory.
-	cudaStatus = cudaMemcpy(c, dev_c, size * sizeof(payload_t), cudaMemcpyDeviceToHost);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMemcpy failed!");
-		goto Error;
-	}
-Error:
-	cudaFree(dev_c);
-
-	return cudaStatus;
-}
+//###############################################################################################################################
+// CPU - HOST - Functions
+//###############################################################################################################################
 
 static void DisplayHeader()
 {
@@ -256,7 +518,7 @@ static void DisplayHeader()
 
 }
 
-void hexstr_to_char(const char* hexstr, uint8_t* bufOut, uint8_t size)
+static void hexstr_to_char(const char* hexstr, uint8_t* bufOut, uint8_t size)
 {
 	size_t len = strlen(hexstr);
 
@@ -272,3 +534,43 @@ void hexstr_to_char(const char* hexstr, uint8_t* bufOut, uint8_t size)
 		//Nothing
 	}
 }
+
+static uint8_t* char_to_hexstr(uint8_t* pCharArrayP, uint8_t u8CountOfBytesP, uint8_t* bufOut)
+{
+	//Convert char array to hex string
+	for (size_t i = 0; i < u8CountOfBytesP; i++)
+	{
+		sprintf((char*)&bufOut[i * 2], "%02x", pCharArrayP[i]);
+	}
+	return (uint8_t*)bufOut;
+}
+
+
+//###############################################################################################################################
+// GPU - DEVICE - Functions
+//###############################################################################################################################
+
+//__global__ void  hashPayload(cudaHashPayload_t *c)
+//{
+//	int idx = (blockDim.x*blockIdx.x) + threadIdx.x;
+//
+//	sha3_SingleExeuction(c[idx].payload, 83, c[idx].shaPayload);
+//}
+//
+//__global__ void  hashDiceUnit(cudaHashDiceUnit_t *c)
+//{
+//	int idx = (blockDim.x*blockIdx.x) + threadIdx.x;
+//
+//	sha3_SingleExeuction(c[idx].unit, 128, c[idx].shaDiceUnit);
+//}
+//
+//__global__ void  validateUnits()
+//{
+//
+//}
+
+//__global__ void cudaRandPayload(payload_t *d_out)
+//{
+//	int i = (blockDim.x*blockIdx.x) + threadIdx.x;
+//	getPayloadCuda(d_out[i].payload, cPayloadSize);
+//}

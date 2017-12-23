@@ -86,6 +86,8 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <CudaCompile Include="BufferUnused.cu" />
+    <CudaCompile Include="diceKernels.cu" />
     <CudaCompile Include="kernel.cu" />
   </ItemGroup>
   <ItemGroup>
@@ -94,7 +96,9 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClCompile Include="SwatcBeats_C.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="DiceCalcCuda.cuh" />
+    <ClInclude Include="DiceCalcCudaTypes.cuh" />
+    <ClInclude Include="DiceCudaCalculation.cuh" />
+    <ClInclude Include="diceKernels.cuh" />
     <ClInclude Include="RandomGen.h" />
     <ClInclude Include="RandomGenCuda.cuh" />
     <ClInclude Include="sha3.h" />

@@ -8,7 +8,8 @@
 __device__ __host__  void getBeats(uint8_t* buffer)
 {
 	uint32_t u32BeatsL = 0;
-	static time_t  TimeG;
+    time_t  TimeG;
+	uint8_t *u32BeatsLp;
 
 	//Local const
 	const time_t _referentDateSeconds = 978303600; //"January 01, 2001 00:00:00 GMT+0100" in seconds
@@ -23,6 +24,10 @@ __device__ __host__  void getBeats(uint8_t* buffer)
 	//Multiply to beats per seconds
 	u32BeatsL *= _beatsPerSecond;
 
-	//Save data
-	memcpy(buffer, &u32BeatsL, sizeof(uint32_t));
+	//Reverse order (machine code related)
+	u32BeatsLp = (uint8_t *)&u32BeatsL;
+	buffer[0] = u32BeatsLp[3];
+	buffer[1] = u32BeatsLp[2];
+	buffer[2] = u32BeatsLp[1];
+	buffer[3] = u32BeatsLp[0];
 }
