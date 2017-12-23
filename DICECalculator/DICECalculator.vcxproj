@@ -91,6 +91,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <CudaCompile Include="kernel.cu" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="FIleWorker.cpp" />
     <ClCompile Include="RandomGen.cpp" />
     <ClCompile Include="sha3.cpp" />
     <ClCompile Include="SwatcBeats_C.cpp" />
@@ -99,6 +100,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClInclude Include="DiceCalcCudaTypes.cuh" />
     <ClInclude Include="DiceCudaCalculation.cuh" />
     <ClInclude Include="diceKernels.cuh" />
+    <ClInclude Include="FIleWorker.h" />
     <ClInclude Include="RandomGen.h" />
     <ClInclude Include="RandomGenCuda.cuh" />
     <ClInclude Include="sha3.h" />

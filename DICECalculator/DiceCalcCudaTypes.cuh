@@ -8,6 +8,8 @@
 #define cDICE_SWATCH_TIME_SIZE      ((uint8_t)4)
 #define cDICE_PAYLOAD_SIZE          ((uint8_t)83)
 #define cDICE_SHA3_512_SIZE         ((uint8_t)64)
+#define cDICE_UNIT_SIZE             (cDICE_ADDR_SIZE+cDICE_ADDR_SIZE+cDICE_ZEROES_SIZE+cDICE_SWATCH_TIME_SIZE+cDICE_PAYLOAD_SIZE)
+#define cDICE_PROTO_SIZE            (cDICE_ADDR_SIZE+cDICE_ADDR_SIZE+cDICE_ZEROES_SIZE+cDICE_SWATCH_TIME_SIZE+cDICE_SHA3_512_SIZE)
 
 #define cBYTE_TO_HEX                ((uint8_t)2)
 #endif

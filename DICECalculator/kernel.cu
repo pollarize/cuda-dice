@@ -4,20 +4,25 @@
 #include <stdio.h> 
 #include <string>
 #include <time.h>
-#include <chrono>
-#include <iostream>       
+#include <chrono>     
 #include <thread>         
-
+#include <fstream>
 using namespace std;
 
 //###############################################################################################################################
 // Local Defines
 //###############################################################################################################################
 
+#ifndef OPTIMIZED
+	#define OPTIMIZEDOff	
+#endif
+
 #define cNumberOfBlocks           (1536)
 #define cNumberOfThreadsPerBlock  (256)
 #define cSizeOfDataPerThread      (128)
 #define cNumberOfThreads          (cNumberOfBlocks*cNumberOfThreadsPerBlock)
+
+#define cOutputFile               ("cudaUnit.json")
 
 #ifndef STATUS
 #define CUDA_E_OK                 ((uint8_t)0)
@@ -44,6 +49,7 @@ using namespace std;
 #include "ValidationCuda.cuh"
 #include "RandomGenCuda.cuh"
 #include "DiceCudaCalculation.cuh"
+#include "FIleWorker.h"
 
 //###############################################################################################################################
 // Local Types
@@ -65,6 +71,7 @@ typedef enum ProgramStates {
 	eProgram_Loop_CUDA_SHA3_DICE_Proto,
 	eProgram_Loop_CUDA_Validate,
 	eProgram_Loop_Host_Validate,
+	eProgram_Loop_Host_Display_Speed,
 
 	//Prepare to exit
 	eProgram_CUDA_Cpy_Device_Memory,
@@ -79,9 +86,8 @@ typedef enum ProgramStates {
 // Local Function Protorypes
 //###############################################################################################################################
 
-//void hexstr_to_char(const char* hexstr, uint8_t* bufOut, uint8_t size);
-//static uint8_t* char_to_hexstr(uint8_t* pCharArrayP, uint8_t u8CountOfBytesP, uint8_t* bufOut);
 static void DisplayHeader(void);
+static int writeToFile(diceUnitHex_t* diceUnitP);
 
 //###############################################################################################################################
 // Local Data
@@ -97,6 +103,7 @@ auto startTimer = chrono::steady_clock::now();
 auto endTimer = chrono::steady_clock::now();
 static size_t sValidDiceUnitIdx = 0;
 static diceUnitHex_t diceUnitValid;
+static char stringBufferL[1024];
 
 //Device-GPU
 static payload_t* pD_Payloads = 0;
@@ -107,9 +114,12 @@ static bool* pD_ValidatingRes = 0;
 static uint16_t* pD_U16Zeroes = 0;
 
 //Copy on Host
+#ifndef OPTIMIZED
 static payload_t h_Payloads[cNumberOfThreads];
-static diceProtoHEX_t h_Protos[cNumberOfThreads];
 static hashProtoHex_t h_ProtosShaHex[cNumberOfThreads];
+#endif // !OPTIMIZED
+
+static diceProtoHEX_t h_Protos[cNumberOfThreads];
 static bool h_ValidatingRes[cNumberOfThreads];
 static uint16_t h_U16Zeroes;
 
@@ -128,13 +138,15 @@ int main(int argc, char* argv[])
 	const char* zeroes = "12";
 
 	//Set default Proto
-	diceProtoHEX_t dProto;
+	diceProtoHEX_t diceProtoL;
 	payload_t buf_PayloadL;
-	int bIsEqualL;
+	int bIsEqualL = CUDA_NOT_OK;
+	uint8_t aShaReturnL[cDICE_SHA3_512_SIZE];
+	uint8_t aShaHexReturnL[cDICE_UNIT_SIZE];
 
 	//Get zeroes from string
-	uint8_t aZerosL[1];
-	hexstr_to_char((uint8_t*)zeroes, aZerosL, 1);
+	uint8_t aZerosL[cDICE_ZEROES_SIZE];
+	hexstr_to_char((uint8_t*)zeroes, aZerosL, cDICE_ZEROES_SIZE);
 
 	//Show data from GPU on console
 	DisplayHeader();
@@ -195,16 +207,16 @@ int main(int argc, char* argv[])
 			cudaStatus = cudaMemcpy(pD_U16Zeroes, aZerosL, sizeof(uint8_t), cudaMemcpyHostToDevice);
 
 			//Set const value
-			memcpy(dProto.addrMin, addrMin, 20 * 2);
-			memcpy(dProto.addrOp, addrOp, 20 * 2);
-			memcpy(dProto.validZeroes, zeroes, 1 * 2);
-			memset(dProto.swatchTime, 1, 4 * 2);
-			memset(dProto.shaPayload, 1, 64 * 2);
+			memcpy(diceProtoL.addrMin, addrMin, cDICE_ADDR_SIZE * cBYTE_TO_HEX);
+			memcpy(diceProtoL.addrOp, addrOp, cDICE_ADDR_SIZE * cBYTE_TO_HEX);
+			memcpy(diceProtoL.validZeroes, zeroes, cDICE_ZEROES_SIZE * cBYTE_TO_HEX);
+			memset(diceProtoL.swatchTime, 1, cDICE_SWATCH_TIME_SIZE * cBYTE_TO_HEX);
+			memset(diceProtoL.shaPayload, 1, cDICE_SHA3_512_SIZE * cBYTE_TO_HEX);
 
 			//Init data in GPU with one CPU
 			for (size_t i = 0; i < cNumberOfThreads; i++)
 			{
-				memcpy(&h_Protos[i], &dProto, 109 * 2);
+				memcpy(&h_Protos[i], &diceProtoL, cDICE_PROTO_SIZE * cBYTE_TO_HEX);
 			}
 
 			cudaStatus = cudaMemcpy(pD_Protos, &h_Protos, sizeof(h_Protos), cudaMemcpyHostToDevice);
@@ -250,7 +262,6 @@ int main(int argc, char* argv[])
 
 			//Loop states
 		case eProgram_Loop_CUDA_Fill_Random:
-			startTimer = chrono::steady_clock::now();
 
 			// Launch a kernel on the GPU with one thread for each element.
 			gCUDA_Fill_Payload << < cNumberOfBlocks, cNumberOfThreadsPerBlock, cSizeOfDataPerThread >> > (pD_Payloads);
@@ -273,24 +284,20 @@ int main(int argc, char* argv[])
 				}
 				else
 				{
+#ifndef OPTIMIZED
 					// Copy output vector from GPU buffer to host memory.
 					cudaStatus = cudaMemcpy(h_Payloads, pD_Payloads, cNumberOfThreads * sizeof(payload_t), cudaMemcpyDeviceToHost);
 					if (cudaStatus != cudaSuccess) {
 						fprintf(stderr, "cudaMemcpy failed!");
 						PStates = eProgram_CUDA_Clean_Device_Memory;
 					}
+#endif// !OPTIMIZED
 					PStates = eProgram_Loop_CUDA_SHA3_Random;
 				}
 			}
-			endTimer = chrono::steady_clock::now();
-			/*cout << "Fill RANDOM Elapsed time in milliseconds : "
-				<< chrono::duration_cast<chrono::milliseconds>(endTimer - startTimer).count()
-				<< " ms" << endl;*/
 			break;
 
 		case eProgram_Loop_CUDA_SHA3_Random:
-			startTimer = chrono::steady_clock::now();
-
 			// Launch a kernel on the GPU with one thread for each element.
 			gCUDA_SHA3_Random << < cNumberOfBlocks, cNumberOfThreadsPerBlock >> > (pD_Payloads, pD_Protos);
 
@@ -313,19 +320,17 @@ int main(int argc, char* argv[])
 				}
 				else
 				{
+#ifndef OPTIMIZED
 					// Copy output vector from GPU buffer to host memory.
 					cudaStatus = cudaMemcpy(h_Protos, pD_Protos, cNumberOfThreads * sizeof(diceProtoHEX_t), cudaMemcpyDeviceToHost);
 					if (cudaStatus != cudaSuccess) {
 						fprintf(stderr, "cudaMemcpy failed!");
 						PStates = eProgram_CUDA_Clean_Device_Memory;
 					}
+#endif// !OPTIMIZED
 					PStates = eProgram_Loop_Host_Time;
 				}
 			}
-			endTimer = chrono::steady_clock::now();
-			/*cout << "SHA3-512 RANDOM Elapsed time in milliseconds : "
-				<< chrono::duration_cast<chrono::milliseconds>(endTimer - startTimer).count()
-				<< " ms" << endl;*/
 			break;
 
 		case eProgram_Loop_Host_Time:
@@ -348,8 +353,6 @@ int main(int argc, char* argv[])
 			break;
 
 		case eProgram_Loop_CUDA_SHA3_DICE_Proto:
-			startTimer = chrono::steady_clock::now();
-
 			//Launch a kernel on the GPU with one thread for each element.
 			gCUDA_SHA3_Proto << < cNumberOfBlocks, cNumberOfThreadsPerBlock, cSizeOfDataPerThread >> > (pD_Protos, pD_U8Time, pD_ProtosShaHex);
 
@@ -373,6 +376,7 @@ int main(int argc, char* argv[])
 				else
 				{
 					//Copy output vector from GPU buffer to host memory.
+#ifndef OPTIMIZED
 					cudaStatus = cudaMemcpy(h_Protos, pD_Protos, cNumberOfThreads * sizeof(diceProtoHEX_t), cudaMemcpyDeviceToHost);
 					cudaStatus = cudaMemcpy(h_ProtosShaHex, pD_ProtosShaHex, cNumberOfThreads * sizeof(hashProtoHex_t), cudaMemcpyDeviceToHost);
 
@@ -380,18 +384,13 @@ int main(int argc, char* argv[])
 						fprintf(stderr, "cudaMemcpy failed!");
 						PStates = eProgram_CUDA_Clean_Device_Memory;
 					}
+#endif// !OPTIMIZED
 					PStates = eProgram_Loop_CUDA_Validate;
 				}
 			}
-			endTimer = chrono::steady_clock::now();
-			/*cout << "SHA3-512 PROTOS Elapsed time in milliseconds : "
-				<< chrono::duration_cast<chrono::milliseconds>(endTimer - startTimer).count()
-				<< " ms" << endl;*/
 			break;
 
 		case eProgram_Loop_CUDA_Validate:
-			startTimer = chrono::steady_clock::now();
-
 			//Launch a kernel on the GPU with one thread for each element.
 			gCUDA_ValidateProtoHash << < cNumberOfBlocks, cNumberOfThreadsPerBlock, cSizeOfDataPerThread >> > (pD_ProtosShaHex, pD_U16Zeroes, pD_ValidatingRes);
 
@@ -423,10 +422,6 @@ int main(int argc, char* argv[])
 					PStates = eProgram_Loop_Host_Validate;
 				}
 			}
-			endTimer = chrono::steady_clock::now();
-			/*cout << "Validating Elapsed time in milliseconds : "
-				<< chrono::duration_cast<chrono::milliseconds>(endTimer - startTimer).count()
-				<< " ms" << endl;*/
 			break;
 
 		case eProgram_Loop_Host_Validate:
@@ -441,7 +436,6 @@ int main(int argc, char* argv[])
 				}
 			}
 			break;
-
 
 			//Prepare to exit
 		case eProgram_CUDA_Cpy_Device_Memory:
@@ -459,43 +453,40 @@ int main(int argc, char* argv[])
 
 		case eProgram_Host_Prepare_Check_Unit:
 			//Set Up Dice Unit
-			memcpy(diceUnitValid.addrOp, dProto.addrOp, 20 * 2);
-			memcpy(diceUnitValid.addrMin, dProto.addrMin, 20 * 2);
-			memcpy(diceUnitValid.validZeroes, dProto.validZeroes, 1 * 2);
+			memcpy(diceUnitValid.addrOp, diceProtoL.addrOp, cDICE_ADDR_SIZE * cBYTE_TO_HEX);
+			memcpy(diceUnitValid.addrMin, diceProtoL.addrMin, cDICE_ADDR_SIZE * cBYTE_TO_HEX);
+			memcpy(diceUnitValid.validZeroes, diceProtoL.validZeroes, cDICE_ZEROES_SIZE * cBYTE_TO_HEX);
 			dCUDA_Char_To_HexStr(aU8Time, 4, diceUnitValid.swatchTime);
 			dCUDA_Char_To_HexStr(buf_PayloadL.payload, sizeof(payload_t), diceUnitValid.payload);
 
-			
+			//Free up GPU Memory
+			PStates = eProgram_CUDA_Clean_Device_Memory;
+
+#ifndef OPTIMIZED			
 			//Check Hash of proto is as expected
 			//Hash Random
-			uint8_t aShaReturnL[64];
-			sha3_SingleExeuction(diceUnitValid.payload, 83 * 2, aShaReturnL);
+			sha3_SingleExeuction(diceUnitValid.payload, cDICE_PAYLOAD_SIZE * cBYTE_TO_HEX, aShaReturnL);
 
 			//Save data to Global Memory in HexString
-			dCUDA_Char_To_HexStr(aShaReturnL, 64, dProto.shaPayload);
+			dCUDA_Char_To_HexStr(aShaReturnL, cDICE_SHA3_512_SIZE, diceProtoL.shaPayload);
 
 			//Set Time in Global Memory for each Proto
-			memcpy(dProto.swatchTime, diceUnitValid.swatchTime, 4 * 2);
+			memcpy(diceProtoL.swatchTime, diceUnitValid.swatchTime, cDICE_SWATCH_TIME_SIZE * cBYTE_TO_HEX);
 
 			//Hash Random
-			sha3_SingleExeuction(&dProto, 109 * 2, aShaReturnL);
+			sha3_SingleExeuction(&diceProtoL, cDICE_PROTO_SIZE * cBYTE_TO_HEX, aShaReturnL);
 
 			//Save data to Global Memory in HexString 
-			uint8_t aShaHexReturnL[128];
-			dCUDA_Char_To_HexStr(aShaReturnL, 64, aShaHexReturnL);
+			dCUDA_Char_To_HexStr(aShaReturnL, cDICE_SHA3_512_SIZE, aShaHexReturnL);
 
 			//Check is the hash value is as expected
-			bIsEqualL = memcmp(aShaHexReturnL, h_ProtosShaHex[sValidDiceUnitIdx].hashProto, 128);
+			bIsEqualL = memcmp(aShaHexReturnL, h_ProtosShaHex[sValidDiceUnitIdx].hashProto, cDICE_UNIT_SIZE);
 
-			if (CUDA_E_OK == bIsEqualL)
-			{
-				PStates = eProgram_CUDA_Clean_Device_Memory;
-			}
-			else
+			if (CUDA_E_OK != bIsEqualL)
 			{
 				PStates = eProgram_Loop_CUDA_Fill_Random;
 			}
-
+#endif// !OPTIMIZED
 			break;
 
 		case eProgram_CUDA_Clean_Device_Memory:
@@ -509,11 +500,16 @@ int main(int argc, char* argv[])
 			break;
 
 		case eProgram_Exit:
-			uint8_t aPrintReadyL[129];
-			memcpy(aPrintReadyL, h_ProtosShaHex[sValidDiceUnitIdx].hashProto, 128);
-			aPrintReadyL[128] = '\0';
+#ifndef OPTIMIZED
+			uint8_t aPrintReadyL[cDICE_UNIT_SIZE+1];
+			memcpy(aPrintReadyL, h_ProtosShaHex[sValidDiceUnitIdx].hashProto, cDICE_UNIT_SIZE);
+			aPrintReadyL[cDICE_UNIT_SIZE] = '\0';
 
 			printf("%s\n", aPrintReadyL);
+#endif // !OPTIMIZED
+
+			writeToFile(&diceUnitValid);
+
 			bIsProgramRunning = false;
 			break;
 
@@ -568,59 +564,40 @@ static void DisplayHeader()
 
 }
 
-//static void hexstr_to_char(const char* hexstr, uint8_t* bufOut, uint8_t size)
-//{
-//	size_t len = strlen(hexstr);
-//
-//	if (len % 2 == 0)
-//	{
-//		for (size_t i = 0, j = 0; j < size; i += 2, j++)
-//		{
-//			bufOut[j] = (hexstr[i] % 32 + 9) % 25 * 16 + (hexstr[i + 1] % 32 + 9) % 25;
-//		}
-//	}
-//	else
-//	{
-//		//Nothing
-//	}
-//}
-//
-//static uint8_t* char_to_hexstr(uint8_t* pCharArrayP, uint8_t u8CountOfBytesP, uint8_t* bufOut)
-//{
-//	//Convert char array to hex string
-//	for (size_t i = 0; i < u8CountOfBytesP; i++)
-//	{
-//		sprintf((char*)&bufOut[i * 2], "%02x", pCharArrayP[i]);
-//	}
-//	return (uint8_t*)bufOut;
-//}
+static int writeToFile(diceUnitHex_t* diceUnitP)
+{
+	int iLenghtL;
+	char addrOp[cDICE_ADDR_SIZE*cBYTE_TO_HEX + 1];
+	char addrMin[cDICE_ADDR_SIZE*cBYTE_TO_HEX + 1];
+	char zeroes[cDICE_ZEROES_SIZE*cBYTE_TO_HEX + 1];
+	char swatchTime[cDICE_SWATCH_TIME_SIZE*cBYTE_TO_HEX + 1];
+	char payload[cDICE_PAYLOAD_SIZE*cBYTE_TO_HEX + 1];
 
+	memcpy(addrOp, diceUnitP->addrOp, cDICE_ADDR_SIZE*cBYTE_TO_HEX);
+	memcpy(addrMin, diceUnitP->addrMin, cDICE_ADDR_SIZE*cBYTE_TO_HEX);
+	memcpy(zeroes, diceUnitP->validZeroes, cDICE_ZEROES_SIZE*cBYTE_TO_HEX);
+	memcpy(swatchTime, diceUnitP->swatchTime, cDICE_SWATCH_TIME_SIZE*cBYTE_TO_HEX);
+	memcpy(payload, diceUnitP->payload, cDICE_PAYLOAD_SIZE*cBYTE_TO_HEX);
+
+	addrOp[cDICE_ADDR_SIZE*cBYTE_TO_HEX] = '\0';
+	addrMin[cDICE_ADDR_SIZE*cBYTE_TO_HEX] = '\0';
+	zeroes[cDICE_ZEROES_SIZE*cBYTE_TO_HEX] = '\0';
+	swatchTime[cDICE_SWATCH_TIME_SIZE*cBYTE_TO_HEX] = '\0';
+	payload[cDICE_PAYLOAD_SIZE*cBYTE_TO_HEX] = '\0';
+
+	iLenghtL = sprintf(stringBufferL, "\{\"addrOperator\": \"%s\",\"addrMiner\" : \"%s\",\"validZeros\" : \"%s\",\"swatchTime\" : \"%s\",	\"payLoad\" : \"%s\" \}", addrOp, addrMin, zeroes, swatchTime, payload);
+	
+	ofstream myfile;
+	myfile.open(cOutputFile);
+	myfile.write(stringBufferL,iLenghtL);
+	myfile.close();
+
+	delete[] addrOp, addrMin, zeroes, swatchTime, payload;
+
+	return 0;
+}
 
 //###############################################################################################################################
 // GPU - DEVICE - Functions
 //###############################################################################################################################
 
-//__global__ void  hashPayload(cudaHashPayload_t *c)
-//{
-//	int idx = (blockDim.x*blockIdx.x) + threadIdx.x;
-//
-//	sha3_SingleExeuction(c[idx].payload, 83, c[idx].shaPayload);
-//}
-//
-//__global__ void  hashDiceUnit(cudaHashDiceUnit_t *c)
-//{
-//	int idx = (blockDim.x*blockIdx.x) + threadIdx.x;
-//
-//	sha3_SingleExeuction(c[idx].unit, 128, c[idx].shaDiceUnit);
-//}
-//
-//__global__ void  validateUnits()
-//{
-//
-//}
-
-//__global__ void cudaRandPayload(payload_t *d_out)
-//{
-//	int i = (blockDim.x*blockIdx.x) + threadIdx.x;
-//	getPayloadCuda(d_out[i].payload, cPayloadSize);
-//}
