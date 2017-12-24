@@ -5,7 +5,6 @@
     <CudaCompile Include="diceKernels.cu">
       <Filter>Kernels</Filter>
     </CudaCompile>
-    <CudaCompile Include="BufferUnused.cu" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Models">

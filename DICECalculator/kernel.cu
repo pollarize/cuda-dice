@@ -1,3 +1,29 @@
+/*
+* Copyright (c) 2017, Mihail Maldzhanski <pollarize@gmail.com>
+* All rights reserved.
+*
+* Redistribution and use in source and binary forms, with or without
+* modification, are permitted provided that the following conditions are met:
+*
+* * Redistributions of source code must retain the above copyright notice, this
+*   list of conditions and the following disclaimer.
+* * Redistributions in binary form must reproduce the above copyright notice,
+*   this list of conditions and the following disclaimer in the documentation
+*   and/or other materials provided with the distribution.
+*
+* THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+* AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+* IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+* ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+* LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+* CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+* SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+* INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+* CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+* ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+* POSSIBILITY OF SUCH DAMAGE.
+*/
+
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 #include <iostream>
@@ -14,7 +40,7 @@ using namespace std;
 //###############################################################################################################################
 
 #ifndef OPTIMIZED
-	#define OPTIMIZEDOff	
+#define OPTIMIZED	
 #endif
 
 #define cNumberOfBlocks           (1536)
@@ -22,12 +48,18 @@ using namespace std;
 #define cSizeOfDataPerThread      (128)
 #define cNumberOfThreads          (cNumberOfBlocks*cNumberOfThreadsPerBlock)
 
-#define cOutputFile               ("cudaUnit.json")
-
 #ifndef STATUS
 #define CUDA_E_OK                 ((uint8_t)0)
 #define CUDA_NOT_OK               ((uint8_t)1)
 #define CUDA_PENDING_OK           ((uint8_t)2)
+#endif
+
+#ifndef CMD
+#define CMD_OUTPUT_FILE            ((uint8_t)1)
+#define CMD_ADRR_OP                ((uint8_t)2)
+#define CMD_ADRR_MIN               ((uint8_t)3)
+#define CMD_VALID_ZEROES           ((uint8_t)4)
+#define CMD_COUNT                  ((uint8_t)5)
 #endif
 
 
@@ -87,7 +119,7 @@ typedef enum ProgramStates {
 //###############################################################################################################################
 
 static void DisplayHeader(void);
-static int writeToFile(diceUnitHex_t* diceUnitP);
+static int writeToFile(const char* outputFile, diceUnitHex_t* diceUnitP);
 
 //###############################################################################################################################
 // Local Data
@@ -132,32 +164,39 @@ int main(int argc, char* argv[])
 	cudaGetDeviceProperties(&props, 0);
 	cudaSetDeviceFlags(cudaDeviceScheduleYield | cudaDeviceMapHost | cudaDeviceLmemResizeToMax);
 
-	//Stub for constant input from console
-	const char* addrOp = "03037a1e2905d3bf34b31f61efcb0960ef512809";
-	const char* addrMin = "0204c09f6117454ab573bd166fbef7c1e4832c1f";
-	const char* zeroes = "12";
+	//Input from console
+	const char* pOutputFile = 0;
+	const char* pAddrOpL = 0;
+	const char* pAddrMinL = 0;
+	const char* pZeroesL = 0;
 
 	//Set default Proto
 	diceProtoHEX_t diceProtoL;
 	payload_t buf_PayloadL;
+
+#ifndef OPTIMIZED
 	int bIsEqualL = CUDA_NOT_OK;
 	uint8_t aShaReturnL[cDICE_SHA3_512_SIZE];
 	uint8_t aShaHexReturnL[cDICE_UNIT_SIZE];
+#endif // !OPTIMIZED
 
 	//Get zeroes from string
 	uint8_t aZerosL[cDICE_ZEROES_SIZE];
-	hexstr_to_char((uint8_t*)zeroes, aZerosL, cDICE_ZEROES_SIZE);
-
-	//Show data from GPU on console
-	DisplayHeader();
 
 	while (bIsProgramRunning)
 	{
 		switch (PStates)
 		{
 		case eProgram_Init:
+#ifndef OPTIMIZED
+			//Show Information for GPU
+			DisplayHeader();
+#endif // !OPTIMIZED
+
+			//Reset GPU
 			cudaDeviceReset();
 			cudaThreadExit();
+
 			//Set current GPU Card (zero by Default for single GPU on system)
 			cudaStatus = cudaSetDevice(0);
 
@@ -174,10 +213,26 @@ int main(int argc, char* argv[])
 			break;
 
 		case eProgram_Get_Console_Options:
-			PStates = eProgram_CUDA_Allocate_Memory;
+			if (argc == CMD_COUNT)
+			{
+				pOutputFile = argv[CMD_OUTPUT_FILE];
+				pAddrOpL = argv[CMD_ADRR_OP];
+				pAddrMinL = argv[CMD_ADRR_MIN];
+				pZeroesL = argv[CMD_VALID_ZEROES];
+				PStates = eProgram_CUDA_Allocate_Memory;
+			}
+			else
+			{
+				printf("Invalid Arguments\n");
+				PStates = eProgram_CUDA_Clean_Device_Memory;
+			}
+
 			break;
 
 		case eProgram_CUDA_Allocate_Memory:
+			//Set zeroes
+			hexstr_to_char((uint8_t*)pZeroesL, aZerosL, cDICE_ZEROES_SIZE);
+
 			//Allocate memory on GPU
 			cudaStatus = cudaMalloc((void**)&pD_Payloads, cNumberOfThreads * sizeof(payload_t));
 			cudaStatus = cudaMalloc((void**)&pD_Protos, cNumberOfThreads * sizeof(diceProtoHEX_t));
@@ -189,7 +244,7 @@ int main(int argc, char* argv[])
 			//Check for Errors
 			if (cudaStatus != cudaSuccess)
 			{
-				fprintf(stderr, "cudaMalloc failed on Payload!");
+				fprintf(stderr, "cudaMalloc failed on CUDA_Allocate_Memory!");
 				PStates = eProgram_CUDA_Clean_Device_Memory;
 			}
 			else
@@ -207,9 +262,9 @@ int main(int argc, char* argv[])
 			cudaStatus = cudaMemcpy(pD_U16Zeroes, aZerosL, sizeof(uint8_t), cudaMemcpyHostToDevice);
 
 			//Set const value
-			memcpy(diceProtoL.addrMin, addrMin, cDICE_ADDR_SIZE * cBYTE_TO_HEX);
-			memcpy(diceProtoL.addrOp, addrOp, cDICE_ADDR_SIZE * cBYTE_TO_HEX);
-			memcpy(diceProtoL.validZeroes, zeroes, cDICE_ZEROES_SIZE * cBYTE_TO_HEX);
+			memcpy(diceProtoL.addrMin, pAddrMinL, cDICE_ADDR_SIZE * cBYTE_TO_HEX);
+			memcpy(diceProtoL.addrOp, pAddrOpL, cDICE_ADDR_SIZE * cBYTE_TO_HEX);
+			memcpy(diceProtoL.validZeroes, pZeroesL, cDICE_ZEROES_SIZE * cBYTE_TO_HEX);
 			memset(diceProtoL.swatchTime, 1, cDICE_SWATCH_TIME_SIZE * cBYTE_TO_HEX);
 			memset(diceProtoL.shaPayload, 1, cDICE_SHA3_512_SIZE * cBYTE_TO_HEX);
 
@@ -223,7 +278,7 @@ int main(int argc, char* argv[])
 
 			if (cudaStatus != cudaSuccess)
 			{
-				fprintf(stderr, "cudaMemcpy failed!");
+				fprintf(stderr, "cudaMemcpy failed on copy Host to Device!");
 				PStates = eProgram_CUDA_Clean_Device_Memory;
 			}
 			else
@@ -240,7 +295,7 @@ int main(int argc, char* argv[])
 			cudaStatus = cudaGetLastError();
 			if (cudaStatus != cudaSuccess)
 			{
-				fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
+				fprintf(stderr, "CURAND_Init launch failed: %s\n", cudaGetErrorString(cudaStatus));
 				PStates = eProgram_CUDA_Clean_Device_Memory;
 			}
 			else
@@ -250,7 +305,7 @@ int main(int argc, char* argv[])
 				cudaStatus = cudaDeviceSynchronize();
 				if (cudaStatus != cudaSuccess)
 				{
-					fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
+					fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching CURAND_Init!\n", cudaStatus);
 					PStates = eProgram_CUDA_Clean_Device_Memory;
 				}
 				else
@@ -269,7 +324,7 @@ int main(int argc, char* argv[])
 			cudaStatus = cudaGetLastError();
 			if (cudaStatus != cudaSuccess)
 			{
-				fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
+				fprintf(stderr, "CUDA_Fill_Payload  launch failed: %s\n", cudaGetErrorString(cudaStatus));
 				PStates = eProgram_CUDA_Clean_Device_Memory;
 			}
 			else
@@ -279,7 +334,7 @@ int main(int argc, char* argv[])
 				cudaStatus = cudaDeviceSynchronize();
 				if (cudaStatus != cudaSuccess)
 				{
-					fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
+					fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching CUDA_Fill_Payload !\n", cudaStatus);
 					PStates = eProgram_CUDA_Clean_Device_Memory;
 				}
 				else
@@ -305,7 +360,7 @@ int main(int argc, char* argv[])
 			cudaStatus = cudaGetLastError();
 			if (cudaStatus != cudaSuccess)
 			{
-				fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
+				fprintf(stderr, "CUDA_SHA3_Random launch failed: %s\n", cudaGetErrorString(cudaStatus));
 				PStates = eProgram_CUDA_Clean_Device_Memory;
 			}
 			else
@@ -315,7 +370,7 @@ int main(int argc, char* argv[])
 				cudaStatus = cudaDeviceSynchronize();
 				if (cudaStatus != cudaSuccess)
 				{
-					fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
+					fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching CUDA_SHA3_Random !\n", cudaStatus);
 					PStates = eProgram_CUDA_Clean_Device_Memory;
 				}
 				else
@@ -342,7 +397,7 @@ int main(int argc, char* argv[])
 
 			if (cudaStatus != cudaSuccess)
 			{
-				fprintf(stderr, "cudaMemcpy failed!");
+				fprintf(stderr, "cudaMemcpy faile on copy Host to Device!");
 				PStates = eProgram_CUDA_Clean_Device_Memory;
 			}
 			else
@@ -360,7 +415,7 @@ int main(int argc, char* argv[])
 			cudaStatus = cudaGetLastError();
 			if (cudaStatus != cudaSuccess)
 			{
-				fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
+				fprintf(stderr, "CUDA_SHA3_Proto launch failed: %s\n", cudaGetErrorString(cudaStatus));
 				PStates = eProgram_CUDA_Clean_Device_Memory;
 			}
 			else
@@ -370,7 +425,7 @@ int main(int argc, char* argv[])
 				cudaStatus = cudaDeviceSynchronize();
 				if (cudaStatus != cudaSuccess)
 				{
-					fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
+					fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching CUDA_SHA3_Proto !\n", cudaStatus);
 					PStates = eProgram_CUDA_Clean_Device_Memory;
 				}
 				else
@@ -398,7 +453,7 @@ int main(int argc, char* argv[])
 			cudaStatus = cudaGetLastError();
 			if (cudaStatus != cudaSuccess)
 			{
-				fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
+				fprintf(stderr, "CUDA_ValidateProtoHash launch failed: %s\n", cudaGetErrorString(cudaStatus));
 				PStates = eProgram_CUDA_Clean_Device_Memory;
 			}
 			else
@@ -408,7 +463,7 @@ int main(int argc, char* argv[])
 				cudaStatus = cudaDeviceSynchronize();
 				if (cudaStatus != cudaSuccess)
 				{
-					fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
+					fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching CUDA_ValidateProtoHash!\n", cudaStatus);
 					PStates = eProgram_CUDA_Clean_Device_Memory;
 				}
 				else
@@ -440,7 +495,7 @@ int main(int argc, char* argv[])
 			//Prepare to exit
 		case eProgram_CUDA_Cpy_Device_Memory:
 			cudaStatus = cudaMemcpy(buf_PayloadL.payload, pD_Payloads[sValidDiceUnitIdx].payload, sizeof(payload_t), cudaMemcpyDeviceToHost);
-			if (cudaStatus != cudaSuccess) 
+			if (cudaStatus != cudaSuccess)
 			{
 				fprintf(stderr, "cudaMemcpy failed!");
 				PStates = eProgram_CUDA_Clean_Device_Memory;
@@ -495,20 +550,22 @@ int main(int argc, char* argv[])
 			cudaFree(pD_U8Time);
 			cudaFree(pD_ProtosShaHex);
 			cudaFree(pD_ValidatingRes);
+#ifndef OPTIMIZED
 			fprintf(stderr, "Free GPU Memory\n");
+#endif // !OPTIMIZED
 			PStates = eProgram_Exit;
 			break;
 
 		case eProgram_Exit:
 #ifndef OPTIMIZED
-			uint8_t aPrintReadyL[cDICE_UNIT_SIZE+1];
+			uint8_t aPrintReadyL[cDICE_UNIT_SIZE + 1];
 			memcpy(aPrintReadyL, h_ProtosShaHex[sValidDiceUnitIdx].hashProto, cDICE_UNIT_SIZE);
 			aPrintReadyL[cDICE_UNIT_SIZE] = '\0';
 
-			printf("%s\n", aPrintReadyL);
+			printf("Hash of Proto: %s\n", aPrintReadyL);
 #endif // !OPTIMIZED
 
-			writeToFile(&diceUnitValid);
+			writeToFile(pOutputFile, &diceUnitValid);
 
 			bIsProgramRunning = false;
 			break;
@@ -564,7 +621,7 @@ static void DisplayHeader()
 
 }
 
-static int writeToFile(diceUnitHex_t* diceUnitP)
+static int writeToFile(const char* outputFile, diceUnitHex_t* diceUnitP)
 {
 	int iLenghtL;
 	char addrOp[cDICE_ADDR_SIZE*cBYTE_TO_HEX + 1];
@@ -586,13 +643,11 @@ static int writeToFile(diceUnitHex_t* diceUnitP)
 	payload[cDICE_PAYLOAD_SIZE*cBYTE_TO_HEX] = '\0';
 
 	iLenghtL = sprintf(stringBufferL, "\{\"addrOperator\": \"%s\",\"addrMiner\" : \"%s\",\"validZeros\" : \"%s\",\"swatchTime\" : \"%s\",	\"payLoad\" : \"%s\" \}", addrOp, addrMin, zeroes, swatchTime, payload);
-	
-	ofstream myfile;
-	myfile.open(cOutputFile);
-	myfile.write(stringBufferL,iLenghtL);
-	myfile.close();
 
-	delete[] addrOp, addrMin, zeroes, swatchTime, payload;
+	ofstream myfile;
+	myfile.open(outputFile);
+	myfile.write(stringBufferL, iLenghtL);
+	myfile.close();
 
 	return 0;
 }
