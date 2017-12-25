@@ -40,7 +40,7 @@ using namespace std;
 //###############################################################################################################################
 
 #ifndef OPTIMIZED
-#define OPTIMIZED	
+#define OPTIMIZEDoff
 #endif
 
 #define cNumberOfBlocks           (1536)
@@ -490,6 +490,14 @@ int main(int argc, char* argv[])
 					break;
 				}
 			}
+#ifndef OPTIMIZED
+			endTimer = chrono::steady_clock::now();
+			cout << "Elapsed time in milliseconds : "
+				<< chrono::duration_cast<chrono::milliseconds>(endTimer - startTimer).count()
+				<< " ms" << endl;
+			startTimer = chrono::steady_clock::now();
+#endif // !OPTIMIZED
+
 			break;
 
 			//Prepare to exit

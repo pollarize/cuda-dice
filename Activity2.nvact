@@ -1,7 +1,6 @@
 ﻿<Model DefinitionId="3a3ca3f4-7ba7-4c09-a182-6ba59bf12599" DisplayName="Analysis Activity" xmlns="clr-namespace:Ark.PropertyModel;assembly=Ark">
-    <Property Name="ActivityType" Value="Profile" />
     <Property Name="Application" Value="C:\Development\CUDA\DICECalculator\x64\Release\DICECalculator.exe" />
-    <Property Name="Arguments" Value="diceUnitCuda.json 03037a1e2905d3bf34b31f61efcb0960ef512809 0204c09f6117454ab573bd166fbef7c1e4832c1f 18" />
+    <Property Name="Arguments" Value="cudaUnit.json 03037a1e2905d3bf34b31f61efcb0960ef512809 0204c09f6117454ab573bd166fbef7c1e4832c1f 25" />
     <Property Name="EnableCudaApiContextAttachDetach" Value="True" />
     <Property Name="EnableCudaApiContextManagement" Value="True" />
     <Property Name="EnableCudaApiD3D10Interop" Value="True" />
@@ -121,7 +120,5 @@
     <Property Name="EnableToolsExtResourceNaming" Value="True" />
     <Property Name="EnableToolsExtStartEndRangeTrace" Value="True" />
     <Property Name="ExtensionsToSynchronize" Value="*;" />
-    <Property Name="InitialReport" Value="CudaSummary" />
-    <Property Name="OpenReportOnStop" Value="False" />
     <Property Name="WorkingDirectory" Value="C:\Development\CUDA\DICECalculator\DICECalculator\" />
 </Model>

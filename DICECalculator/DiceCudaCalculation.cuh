@@ -39,9 +39,15 @@
 #ifndef cNumberOfThreads
 #error "There is not defined count of used threads!"
 #endif
+//###############################################################################################################################
+// External Function Prototypes
+//###############################################################################################################################
 
  __device__ __host__ uint8_t* dCUDA_Char_To_HexStr(uint8_t* pCharArrayP, uint8_t u8CountOfBytesP, uint8_t* bufOut);
  __device__ __host__ void hexstr_to_char(uint8_t* hexstr, uint8_t* bufOut, uint8_t size);
+ //###############################################################################################################################
+ // GPU-Kernals - HEX
+ //###############################################################################################################################
 
 __global__ void gCUDA_SHA3_Random(payload_t* bufIn, diceProtoHEX_t* bufOut)
 {
@@ -90,6 +96,47 @@ __global__ void gCUDA_ValidateProtoHash(hashProtoHex_t* bufIn, uint16_t* zeroes 
 		validateHash(*zeroes, aShaReturnL, &bufOut[idx]);
 	}
 }
+
+//###############################################################################################################################
+// GPU-Kernals - Byte
+//###############################################################################################################################
+
+__global__ void gCUDA_SHA3_Random_Byte(payload_t* bufIn, diceProto_t* bufOut)
+{
+	int idx = (blockDim.x*blockIdx.x) + threadIdx.x;
+	if (idx < cNumberOfThreads)
+	{
+		//Hash Random Bytes
+		sha3_SingleExeuction(bufIn[idx].payload, cDICE_PAYLOAD_SIZE, bufOut[idx].shaPayload);
+	}
+}
+
+__global__ void gCUDA_SHA3_Proto_Byte(diceProto_t* bufIn, uint8_t* bufTime, hashProtoByte_t* bufOut)
+{
+	int idx = (blockDim.x*blockIdx.x) + threadIdx.x;
+	if (idx < cNumberOfThreads)
+	{
+		//Set Time in Global Memory for each Proto
+		memcpy(bufIn[idx].swatchTime,bufTime,cDICE_SWATCH_TIME_SIZE);
+
+		//Hash Random
+		sha3_SingleExeuction(&bufIn[idx], 109, bufOut[idx].hashProto);
+	}
+}
+
+__global__ void gCUDA_ValidateProtoHash_Byte(hashProtoByte_t* bufIn, uint16_t* zeroes, bool* bufOut)
+{
+	int idx = (blockDim.x*blockIdx.x) + threadIdx.x;
+	if (idx < cNumberOfThreads)
+	{
+		//Convert Hex String to Byte Array
+		validateHash(*zeroes, bufIn[idx].hashProto, &bufOut[idx]);
+	}
+}
+
+//###############################################################################################################################
+// Local Functions
+//###############################################################################################################################
 
  __device__ __host__ void hexstr_to_char(uint8_t* hexstr, uint8_t* bufOut, uint8_t size)
 {

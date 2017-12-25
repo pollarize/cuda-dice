@@ -101,6 +101,12 @@ typedef struct hashPayload
 	uint8_t shaPayload[cDICE_SHA3_512_SIZE];
 }hashPayload_t;
 
+typedef struct hashProtoByte
+{
+	uint8_t hashProto[cDICE_SHA3_512_SIZE];
+}hashProtoByte_t;
+
+
 typedef struct hashProtoHex
 {
 	uint8_t hashProto[cDICE_SHA3_512_SIZE *cBYTE_TO_HEX];
