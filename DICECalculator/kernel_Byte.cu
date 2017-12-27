@@ -43,8 +43,8 @@
 //#define OPTIMIZEDoff
 //#endif
 //
-//#define cNumberOfBlocks           (40000)
-//#define cNumberOfThreadsPerBlock  (64)
+//#define cNumberOfBlocks           (1536)
+//#define cNumberOfThreadsPerBlock  (128)
 //#define cSizeOfDataPerThread      (64)
 //#define cNumberOfThreads          (cNumberOfBlocks*cNumberOfThreadsPerBlock)
 //

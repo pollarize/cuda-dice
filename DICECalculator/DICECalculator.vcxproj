@@ -93,26 +93,18 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
   <ItemGroup>
     <CudaCompile Include="diceKernels.cu" />
     <CudaCompile Include="kernel.cu" />
-    <CudaCompile Include="kernel_Byte.cu" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="FIleWorker.cpp" />
-    <ClCompile Include="RandomGen.cpp" />
-    <ClCompile Include="sha3.cpp" />
-    <ClCompile Include="SwatcBeats_C.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="DiceCalcCudaTypes.cuh" />
     <ClInclude Include="DiceCudaCalculation.cuh" />
     <ClInclude Include="diceKernels.cuh" />
-    <ClInclude Include="FIleWorker.h" />
-    <ClInclude Include="RandomGen.h" />
     <ClInclude Include="RandomGenCuda.cuh" />
-    <ClInclude Include="sha3.h" />
     <ClInclude Include="sha3Cuda.cuh" />
-    <ClInclude Include="SwatcBeats_C.h" />
     <ClInclude Include="SwatchCuda.cuh" />
     <ClInclude Include="ValidationCuda.cuh" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="cudaUnit.json" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

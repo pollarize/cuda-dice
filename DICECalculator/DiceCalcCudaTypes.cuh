@@ -41,6 +41,14 @@
 #define cBYTE_TO_HEX                ((uint8_t)2)
 #endif
 
+#ifdef DICE_BYTE
+
+//Remove HEX size
+#undef  cBYTE_TO_HEX
+#define cBYTE_TO_HEX ((uint8_t)1) 
+
+#endif // DICE_BYTE
+
 
 typedef struct diceUnit
 {

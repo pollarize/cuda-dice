@@ -5,7 +5,6 @@
     <CudaCompile Include="diceKernels.cu">
       <Filter>Kernels</Filter>
     </CudaCompile>
-    <CudaCompile Include="kernel_Byte.cu" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Models">
@@ -29,34 +28,8 @@
     <Filter Include="Kernels">
       <UniqueIdentifier>{f3f84426-6973-4bf4-8b29-464d48e507ef}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Models\FileWorker">
-      <UniqueIdentifier>{1bc2ece6-a1e6-41c0-9993-050fb09300d7}</UniqueIdentifier>
-    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="SwatcBeats_C.cpp">
-      <Filter>Models\SwatchBeats</Filter>
-    </ClCompile>
-    <ClCompile Include="RandomGen.cpp">
-      <Filter>Models\RandomGen</Filter>
-    </ClCompile>
-    <ClCompile Include="sha3.cpp">
-      <Filter>Models\SHA3-512</Filter>
-    </ClCompile>
-    <ClCompile Include="FIleWorker.cpp">
-      <Filter>Models\FileWorker</Filter>
-    </ClCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="SwatcBeats_C.h">
-      <Filter>Models\SwatchBeats</Filter>
-    </ClInclude>
-    <ClInclude Include="sha3.h">
-      <Filter>Models\SHA3-512</Filter>
-    </ClInclude>
-    <ClInclude Include="RandomGen.h">
-      <Filter>Models\RandomGen</Filter>
-    </ClInclude>
     <ClInclude Include="sha3Cuda.cuh">
       <Filter>Models\SHA3-512</Filter>
     </ClInclude>
@@ -78,8 +51,8 @@
     <ClInclude Include="DiceCudaCalculation.cuh">
       <Filter>Models\DiceCalculation</Filter>
     </ClInclude>
-    <ClInclude Include="FIleWorker.h">
-      <Filter>Models\FileWorker</Filter>
-    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="cudaUnit.json" />
   </ItemGroup>
 </Project>
