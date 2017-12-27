@@ -84,7 +84,7 @@ __global__ void gCUDA_SHA3_Proto(diceProtoHEX_t* bufIn, uint8_t* bufTime, hashPr
 	}
 }
 
-__global__ void gCUDA_ValidateProtoHash(hashProtoHex_t* bufIn, uint16_t* zeroes ,bool* bufOut)
+__global__ void gCUDA_ValidateProtoHash(hashProtoHex_t* bufIn, uint16_t* zeroes ,int* bufOut)
 {
 	int idx = (blockDim.x*blockIdx.x) + threadIdx.x;
 	if (idx < cNumberOfThreads)
@@ -93,7 +93,15 @@ __global__ void gCUDA_ValidateProtoHash(hashProtoHex_t* bufIn, uint16_t* zeroes 
 		uint8_t aShaReturnL[64];
 		hexstr_to_char(bufIn[idx].hashProto, aShaReturnL,64);
 
-		validateHash(*zeroes, aShaReturnL, &bufOut[idx]);
+		bool bIsInvalidL = true;
+
+		//Convert Hex String to Byte Array
+		validateHash(*zeroes, aShaReturnL, &bIsInvalidL);
+
+		if (true != bIsInvalidL)
+		{
+			*bufOut = idx;
+		}
 	}
 }
 
@@ -124,13 +132,20 @@ __global__ void gCUDA_SHA3_Proto_Byte(diceProtoHEX_t* bufIn, uint8_t* bufTime, h
 	}
 }
 
-__global__ void gCUDA_ValidateProtoHash_Byte(hashProtoHex_t* bufIn, uint16_t* zeroes, bool* bufOut)
+__global__ void gCUDA_ValidateProtoHash_Byte(hashProtoHex_t* bufIn, uint16_t* zeroes, int* bufOut)
 {
 	int idx = (blockDim.x*blockIdx.x) + threadIdx.x;
 	if (idx < cNumberOfThreads)
 	{
+		bool bIsInvalidL = true;
+
 		//Convert Hex String to Byte Array
-		validateHash(*zeroes, bufIn[idx].hashProto, &bufOut[idx]);
+		validateHash(*zeroes, bufIn[idx].hashProto, &bIsInvalidL);
+
+		if (true != bIsInvalidL)
+		{
+			*bufOut = idx;
+		}
 	}
 }
 
