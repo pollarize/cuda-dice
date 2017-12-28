@@ -35,7 +35,7 @@
 #include "DiceCalcCudaTypes.cuh"
 
 #ifndef cNumberOfThreads
-	#error "There is not defined count of used threads!"
+#error "There is not defined count of used threads!"
 #endif
 
 #define cPayloadSize    ((uint8_t)83)
@@ -59,7 +59,7 @@ __device__ void getPayloadCuda(curandState_t* state, uint8_t *buffer, uint32_t i
 	//First 0-80 bytes
 	for (size_t i = 0; i < cPayloadSizeU32; i += cU32Size)
 	{
-		uint32_t u32RandL = curand(state)*curand(state);
+		uint32_t u32RandL = curand(state);
 		memcpy(&(buffer[i]), &u32RandL, cU32Size);
 	}
 
@@ -71,9 +71,9 @@ __device__ void getPayloadCuda(curandState_t* state, uint8_t *buffer, uint32_t i
 __global__ void gCUDA_CURAND_Init(uint8_t* u8TimeL)
 {
 	int idx = (blockDim.x*blockIdx.x) + threadIdx.x;
-	if (idx < cNumberOfThreads )
+	if (idx < cNumberOfThreads)
 	{
-		uint32_t* u32TimeL =(uint32_t*) &u8TimeL;
+		uint32_t* u32TimeL = (uint32_t*)&u8TimeL;
 		if (idx >= 1)
 		{
 			curand_init((unsigned long long)clock()*(*u32TimeL)*idx, 0, 0, &CurandStateHolder[idx]);
@@ -92,4 +92,19 @@ __global__ void gCUDA_Fill_Payload(payload_t* buffer)
 	{
 		getPayloadCuda(&CurandStateHolder[idx], buffer[idx].payload, idx);
 	}
+}
+
+__global__ void gCUDA_Fill_Payload_Four_Byte(payload_t* buffer)
+{
+	int idx = (blockDim.x*blockIdx.x) + threadIdx.x;
+	if (idx < cNumberOfThreads)
+	{
+		uint32_t u32RandL = curand(&CurandStateHolder[idx]);
+		memcpy(&(buffer[idx].payload[cDICE_SHA3_512_SIZE]), &u32RandL, cU32Size);
+	}
+}
+
+__host__ void Free_CURAND(void)
+{
+	cudaFree(CurandStateHolder);
 }

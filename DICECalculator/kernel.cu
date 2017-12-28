@@ -65,7 +65,15 @@ using namespace std;
 #define CMD_COUNT                  ((uint8_t)5)
 #endif
 
+//Index validation
 #define cINVALID_IDX               ((int)-1)
+
+//Print specific
+#define cPRINT_SPEED_TH            ((int)20)
+
+//Random Gen Optimizations
+#define cRAND_DEV_OK                ((uint8_t)0)
+#define cRAND_DEV_TH                ((uint8_t)100)
 
 #define mPRINT_TIME(func)                                                        \
 	startTimer = chrono::steady_clock::now();                                    \
@@ -80,7 +88,7 @@ using namespace std;
 	if (cudaStatus != cudaSuccess)                                                         \
 	{                                                                                      \
 		fprintf(stderr, "Program Execution Failed: %s\n", cudaGetErrorString(cudaStatus)); \
-		PStates = eProgram_CUDA_Clean_Device_Memory;\
+		PStates = eProgram_CUDA_Clean_Device_Memory;                                       \
 	}
 
 //###############################################################################################################################
@@ -93,7 +101,6 @@ using namespace std;
 #include "ValidationCuda.cuh"
 #include "RandomGenCuda.cuh"
 #include "DiceCudaCalculation.cuh"
-#include "FIleWorker.h"
 
 //###############################################################################################################################
 // Local Types
@@ -141,7 +148,7 @@ static EprogramStates_t Program_GetConsole_Options(int argc, char* argv[]);
 static void Program_Allocate_GPU(void);
 static void Program_Cpy_Host_To_Device(void);
 static void Program_CURAND_Init(void);
-static void Program_Fill_Random(void);
+static void Program_Fill_Random(int iCycleL);
 static void Program_SHA3_Random(void);
 static void Program_GetTime(void);
 static void Program_SHA3_Proto(void);
@@ -190,7 +197,6 @@ static uint8_t aZerosL[cDICE_ZEROES_SIZE];
 //Calculte whole execution time
 static auto progTimer = chrono::steady_clock::now();
 
-
 //Device-GPU
 static payload_t* pD_Payloads = 0;
 static uint8_t* pD_U8Time = 0;
@@ -229,7 +235,7 @@ int main(int argc, char* argv[])
 
 		case eProgram_Get_Console_Options:
 			//Set default next state
-			PStates = Program_GetConsole_Options(argc,argv);
+			PStates = Program_GetConsole_Options(argc, argv);
 			break;
 
 		case eProgram_CUDA_Allocate_Memory:
@@ -261,9 +267,9 @@ int main(int argc, char* argv[])
 		case eProgram_Loop_CUDA_Fill_Random:
 			//Set default next state
 			PStates = eProgram_Loop_CUDA_SHA3_Random;
-			
+
 			//Execute
-			Program_Fill_Random();
+			Program_Fill_Random(iCycles);
 			break;
 
 		case eProgram_Loop_CUDA_SHA3_Random:
@@ -318,7 +324,7 @@ int main(int argc, char* argv[])
 		case eProgram_Host_Prepare_Check_Unit:
 			//Free up GPU Memory
 			PStates = eProgram_CUDA_Clean_Device_Memory;
-			
+
 			//Execute
 			Program_Prepare_Check_Unit();
 			break;
@@ -462,7 +468,7 @@ static int writeToFile_Byte(const char* outputFile, diceUnitHex_t* diceUnitP)
 static void PrintSpeed(void)
 {
 	endTimer = chrono::steady_clock::now();
-	if (iCycles == 10)
+	if (iCycles == cPRINT_SPEED_TH)
 	{
 		cout << "Operations per second: "
 			<< cNumberOfThreads * (1000 / chrono::duration_cast<chrono::milliseconds>(endTimer - startTimer).count())
@@ -563,10 +569,18 @@ static void Program_CURAND_Init(void)
 	mCUDA_HANDLE_ERROR(cudaDeviceSynchronize());
 }
 
-static void Program_Fill_Random(void)
+static void Program_Fill_Random(int iCycleL)
 {
-	// Launch a kernel on the GPU with one thread for each element.
-	gCUDA_Fill_Payload << < cNumberOfBlocks, cNumberOfThreadsPerBlock, cSizeOfDataPerThread >> > (pD_Payloads);
+	if (cRAND_DEV_OK == (iCycleL%cRAND_DEV_TH))
+	{
+		// Launch a kernel on the GPU with one thread for each element.
+		gCUDA_Fill_Payload << < cNumberOfBlocks, cNumberOfThreadsPerBlock, cSizeOfDataPerThread >> > (pD_Payloads);
+	}
+	else
+	{
+		// Launch a kernel on the GPU with one thread for each element.
+		gCUDA_Fill_Payload_Four_Byte << < cNumberOfBlocks, cNumberOfThreadsPerBlock, cSizeOfDataPerThread >> > (pD_Payloads);
+	}
 
 	// Check for any errors launching the kernel
 	mCUDA_HANDLE_ERROR(cudaGetLastError());
@@ -708,7 +722,9 @@ static void Program_Clean_Memory(void)
 	cudaFree(pD_Protos);
 	cudaFree(pD_U8Time);
 	cudaFree(pD_ProtosShaHex);
+	cudaFree(pD_U16Zeroes);
 	cudaFree(pD_ValidIDX);
+	Free_CURAND();
 #ifndef OPTIMIZED
 	fprintf(stderr, "Free GPU Memory\n");
 #endif // !OPTIMIZED
@@ -719,12 +735,12 @@ static void Program_Exit(void)
 #ifndef OPTIMIZED
 #ifndef	DICE_BYTE	
 	uint8_t aPrintReadyL[(cSHA3_512_SIZE*cBYTE_TO_HEX) + 1];
-	memcpy(aPrintReadyL, h_ProtosShaHex[sValidDiceUnitIdx].hashProto, (cSHA3_512_SIZE*cBYTE_TO_HEX));
+	memcpy(aPrintReadyL, h_ProtosShaHex[h_ValidIDX].hashProto, (cSHA3_512_SIZE*cBYTE_TO_HEX));
 	aPrintReadyL[(cSHA3_512_SIZE*cBYTE_TO_HEX)] = '\0';
 
 #else
 	uint8_t aPrintReadyL[(cSHA3_512_SIZE*(cBYTE_TO_HEX + cBYTE_TO_HEX)) + 1];
-	dCUDA_Char_To_HexStr(h_ProtosShaHex[sValidDiceUnitIdx].hashProto, cDICE_SHA3_512_SIZE, aPrintReadyL);
+	dCUDA_Char_To_HexStr(h_ProtosShaHex[h_ValidIDX].hashProto, cDICE_SHA3_512_SIZE, aPrintReadyL);
 	aPrintReadyL[(cSHA3_512_SIZE*(cBYTE_TO_HEX + cBYTE_TO_HEX))] = '\0';
 #endif// !DICE_BYTE
 	printf("Hash of Proto: %s\n", aPrintReadyL);
