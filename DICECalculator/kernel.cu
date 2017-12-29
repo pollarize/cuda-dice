@@ -597,7 +597,7 @@ static void Program_SHA3_Random(void)
 #ifndef DICE_BYTE
 	gCUDA_SHA3_Random << < cNumberOfBlocks, cNumberOfThreadsPerBlock >> > (pD_Payloads, pD_Protos);
 #else
-	gCUDA_SHA3_Random_Byte << < cNumberOfBlocks, cNumberOfThreadsPerBlock >> > (pD_Payloads, pD_Protos);
+	gCUDA_SHA3_Random_Byte << < cNumberOfBlocks, cNumberOfThreadsPerBlock, cSizeOfDataPerThread >> > (pD_Payloads, pD_Protos);
 #endif // !DICE_BYTE
 
 	// Check for any errors launching the kernel
