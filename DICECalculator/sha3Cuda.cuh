@@ -71,7 +71,7 @@ const __constant__  uint64_t keccakf_rndc[24] = {
 	SHA3_CONST(0x0000000080000001UL), SHA3_CONST(0x8000000080008008UL)
 };
 
-const __constant__  unsigned keccakf_rotc[24] = {
+const __constant__ unsigned keccakf_rotc[24] = {
 	1, 3, 6, 10, 15, 21, 28, 36, 45, 55, 2, 14, 27, 41, 56, 8, 25, 43, 62,
 	18, 39, 61, 20, 44
 };
@@ -82,7 +82,7 @@ const __constant__  unsigned keccakf_piln[24] = {
 };
 
 
-__device__ __host__ void keccakf(uint64_t s[25])
+__device__ void keccakf(uint64_t s[25])
 {
 #define KECCAK_ROUNDS 24
 
@@ -125,7 +125,7 @@ __device__ __host__ void keccakf(uint64_t s[25])
 }
 
 /* *************************** Public Inteface ************************ */
-__device__ __host__ void sha3_SingleExeuction(void const *bufIn, size_t len, uint8_t* bufOut)
+__device__ void sha3_SingleExeuction(void const *bufIn, size_t len, uint8_t* bufOut)
 {
 	struct  sha3_context {
 		uint64_t saved;             /* the portion of the input message that we
@@ -195,7 +195,7 @@ __device__ __host__ void sha3_SingleExeuction(void const *bufIn, size_t len, uin
 	SHA3_ASSERT(constexL.byteIndex == 0);
 
 	words = len / sizeof(uint64_t);
-	tail = len - words * sizeof(uint64_t);
+	tail = (unsigned int)(len - words * sizeof(uint64_t));
 
 	SHA3_TRACE("have %d full words to process", (unsigned)words);
 

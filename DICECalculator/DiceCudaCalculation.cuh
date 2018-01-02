@@ -49,7 +49,7 @@
  // GPU-Kernals - HEX
  //###############################################################################################################################
 
-__global__ void gCUDA_SHA3_Random(payload_t* bufIn, diceProtoHEX_t* bufOut)
+__global__ void gCUDA_SHA3_Random(payload_t* bufIn, diceProto_t* bufOut)
 {
 	int idx = (blockDim.x*blockIdx.x) + threadIdx.x;
 	if (idx < cNumberOfThreads)
@@ -67,7 +67,7 @@ __global__ void gCUDA_SHA3_Random(payload_t* bufIn, diceProtoHEX_t* bufOut)
 	}
 }
 
-__global__ void gCUDA_SHA3_Proto(diceProtoHEX_t* bufIn, uint8_t* bufTime, hashProtoHex_t* bufOut)
+__global__ void gCUDA_SHA3_Proto(diceProto_t* bufIn, uint8_t* bufTime, hashProto_t* bufOut)
 {
 	int idx = (blockDim.x*blockIdx.x) + threadIdx.x;
 	if (idx < cNumberOfThreads)
@@ -84,7 +84,7 @@ __global__ void gCUDA_SHA3_Proto(diceProtoHEX_t* bufIn, uint8_t* bufTime, hashPr
 	}
 }
 
-__global__ void gCUDA_ValidateProtoHash(hashProtoHex_t* bufIn, uint16_t* zeroes ,int* bufOut)
+__global__ void gCUDA_ValidateProtoHash(hashProto_t* bufIn, uint16_t* zeroes ,int* bufOut)
 {
 	int idx = (blockDim.x*blockIdx.x) + threadIdx.x;
 	if (idx < cNumberOfThreads)
@@ -109,7 +109,7 @@ __global__ void gCUDA_ValidateProtoHash(hashProtoHex_t* bufIn, uint16_t* zeroes 
 // GPU-Kernals - Byte
 //###############################################################################################################################
 
-__global__ void gCUDA_SHA3_Random_Byte(payload_t* bufIn, diceProtoHEX_t* bufOut)
+__global__ void gCUDA_SHA3_Random_Byte(payload_t* bufIn, diceProto_t* bufOut)
 {
 	int idx = (blockDim.x*blockIdx.x) + threadIdx.x;
 	if (idx < cNumberOfThreads)
@@ -119,7 +119,7 @@ __global__ void gCUDA_SHA3_Random_Byte(payload_t* bufIn, diceProtoHEX_t* bufOut)
 	}
 }
 
-__global__ void gCUDA_SHA3_Proto_Byte(diceProtoHEX_t* bufIn, uint8_t* bufTime, hashProtoHex_t* bufOut)
+__global__ void gCUDA_SHA3_Proto_Byte(diceProto_t* bufIn, uint8_t* bufTime, hashProto_t* bufOut)
 {
 	int idx = (blockDim.x*blockIdx.x) + threadIdx.x;
 	if (idx < cNumberOfThreads)
@@ -132,7 +132,7 @@ __global__ void gCUDA_SHA3_Proto_Byte(diceProtoHEX_t* bufIn, uint8_t* bufTime, h
 	}
 }
 
-__global__ void gCUDA_ValidateProtoHash_Byte(hashProtoHex_t* bufIn, uint16_t* zeroes, int* bufOut)
+__global__ void gCUDA_ValidateProtoHash_Byte(hashProto_t* bufIn, uint16_t* zeroes, int* bufOut)
 {
 	int idx = (blockDim.x*blockIdx.x) + threadIdx.x;
 	if (idx < cNumberOfThreads)

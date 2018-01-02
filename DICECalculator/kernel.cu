@@ -34,6 +34,7 @@
 #include <thread>         
 #include <fstream>
 #include <windows.h>
+#include <math.h>
 using namespace std;
 
 //###############################################################################################################################
@@ -74,6 +75,9 @@ using namespace std;
 //Random Gen Optimizations
 #define cRAND_DEV_OK                ((uint8_t)0)
 #define cRAND_DEV_TH                ((uint8_t)100)
+
+//256 Trailin zeroes
+#define cPZeroes_256                ('0')
 
 #define mPRINT_TIME(func)                                                        \
 	startTimer = chrono::steady_clock::now();                                    \
@@ -138,8 +142,12 @@ typedef enum ProgramStates {
 //###############################################################################################################################
 
 static void DisplayHeader(void);
+
+#ifndef DICE_BYTE
 static int  writeToFile(const char* outputFile, diceUnitHex_t* diceUnitP);
-static int  writeToFile_Byte(const char* outputFile, diceUnitHex_t* diceUnitP);
+#else
+static int  writeToFile_Byte(const char* outputFile, diceUnit_t* diceUnitP);
+#endif // !DICE_BYTE
 static void PrintSpeed(void);
 
 //Program Specific
@@ -171,7 +179,7 @@ static bool bIsProgramRunning = true;
 static uint8_t aU8Time[cDICE_SWATCH_TIME_SIZE];
 static auto startTimer = chrono::steady_clock::now();
 static auto endTimer = chrono::steady_clock::now();
-static diceUnitHex_t diceUnitValid;
+static diceUnit_t diceUnitValid;
 static char stringBufferL[1024];
 static int iCycles = 0;
 
@@ -182,7 +190,7 @@ static const char* pAddrMinL = 0;
 static const char* pZeroesL = 0;
 
 //Set default Proto
-static diceProtoHEX_t diceProtoL;
+static diceProto_t diceProtoL;
 static payload_t buf_PayloadL;
 
 #ifndef OPTIMIZED
@@ -192,7 +200,7 @@ static uint8_t aShaHexReturnL[cDICE_UNIT_SIZE];
 #endif // !OPTIMIZED
 
 //Get zeroes from string
-static uint8_t aZerosL[cDICE_ZEROES_SIZE];
+static uint16_t u16Zeroes;
 
 //Calculte whole execution time
 static auto progTimer = chrono::steady_clock::now();
@@ -200,8 +208,8 @@ static auto progTimer = chrono::steady_clock::now();
 //Device-GPU
 static payload_t* pD_Payloads = 0;
 static uint8_t* pD_U8Time = 0;
-static diceProtoHEX_t* pD_Protos = 0;
-static hashProtoHex_t* pD_ProtosShaHex = 0;
+static diceProto_t* pD_Protos = 0;
+static hashProto_t* pD_ProtosShaHex = 0;
 static uint16_t* pD_U16Zeroes = 0;
 static int* pD_ValidIDX = 0;
 
@@ -209,10 +217,10 @@ static int* pD_ValidIDX = 0;
 #ifndef OPTIMIZED
 static payload_t h_Payloads[cNumberOfThreads];
 static hashProtoHex_t h_ProtosShaHex[cNumberOfThreads];
+static uint16_t h_U16Zeroes;
 #endif // !OPTIMIZED
 
-static diceProtoHEX_t h_Protos[cNumberOfThreads];
-static uint16_t h_U16Zeroes;
+static diceProto_t h_Protos[cNumberOfThreads];
 static int h_ValidIDX = 0;
 
 //###############################################################################################################################
@@ -370,7 +378,6 @@ static void DisplayHeader()
 	wcout << "NBody.GPU" << endl << "=========" << endl << endl;
 
 	wcout << "CUDA version:   v" << CUDART_VERSION << endl;
-	//wcout << "Thrust version: v" << THRUST_MAJOR_VERSION << "." << THRUST_MINOR_VERSION << endl << endl;
 
 	int devCount;
 	cudaGetDeviceCount(&devCount);
@@ -391,7 +398,7 @@ static void DisplayHeader()
 		wcout << "  Threads per block: " << props.maxThreadsPerBlock << endl;
 		wcout << "  Multiprocessors: " << props.multiProcessorCount << endl;
 		wcout << "  Threads per multiprocessor: " << props.maxThreadsPerMultiProcessor << endl;
-		wcout << "  Concurent kernels: " << props.concurrentKernels << endl;
+		wcout << "  Concurrent kernels: " << props.concurrentKernels << endl;
 		wcout << "  Max block dimensions: [ " << props.maxThreadsDim[0] << ", " << props.maxThreadsDim[1] << ", " << props.maxThreadsDim[2] << " ]" << endl;
 		wcout << "  Max grid dimensions:  [ " << props.maxGridSize[0] << ", " << props.maxGridSize[1] << ", " << props.maxGridSize[2] << " ]" << endl;
 		wcout << endl;
@@ -403,6 +410,7 @@ static void DisplayHeader()
 
 }
 
+#ifndef DICE_BYTE
 static int writeToFile(const char* outputFile, diceUnitHex_t* diceUnitP)
 {
 	int iLenghtL;
@@ -424,7 +432,7 @@ static int writeToFile(const char* outputFile, diceUnitHex_t* diceUnitP)
 	swatchTime[cDICE_SWATCH_TIME_SIZE*cBYTE_TO_HEX] = '\0';
 	payload[cDICE_PAYLOAD_SIZE*cBYTE_TO_HEX] = '\0';
 
-	iLenghtL = sprintf(stringBufferL, "\{\"addrOperator\": \"%s\",\"addrMiner\" : \"%s\",\"validZeros\" : \"%s\",\"swatchTime\" : \"%s\",	\"payLoad\" : \"%s\" \}", addrOp, addrMin, zeroes, swatchTime, payload);
+	iLenghtL = sprintf(stringBufferL, "{\"addrOperator\": \"%s\",\"addrMiner\" : \"%s\",\"validZeros\" : \"%s\",\"swatchTime\" : \"%s\",	\"payLoad\" : \"%s\" }", addrOp, addrMin, zeroes, swatchTime, payload);
 
 	ofstream myfile;
 	myfile.open(outputFile);
@@ -433,8 +441,8 @@ static int writeToFile(const char* outputFile, diceUnitHex_t* diceUnitP)
 
 	return 0;
 }
-
-static int writeToFile_Byte(const char* outputFile, diceUnitHex_t* diceUnitP)
+#else
+static int writeToFile_Byte(const char* outputFile, diceUnit_t* diceUnitP)
 {
 	int iLenghtL;
 	char addrOp[cDICE_ADDR_SIZE*(cBYTE_TO_HEX + cBYTE_TO_HEX) + 1];
@@ -455,7 +463,7 @@ static int writeToFile_Byte(const char* outputFile, diceUnitHex_t* diceUnitP)
 	swatchTime[cDICE_SWATCH_TIME_SIZE*(cBYTE_TO_HEX + cBYTE_TO_HEX)] = '\0';
 	payload[cDICE_PAYLOAD_SIZE*(cBYTE_TO_HEX + cBYTE_TO_HEX)] = '\0';
 
-	iLenghtL = sprintf(stringBufferL, "\{\"addrOperator\": \"%s\",\"addrMiner\" : \"%s\",\"validZeros\" : \"%s\",\"swatchTime\" : \"%s\",	\"payLoad\" : \"%s\" \}", addrOp, addrMin, zeroes, swatchTime, payload);
+	iLenghtL = sprintf(stringBufferL, "{\"addrOperator\": \"%s\",\"addrMiner\" : \"%s\",\"validZeros\" : \"%s\",\"swatchTime\" : \"%s\",	\"payLoad\" : \"%s\" }", addrOp, addrMin, zeroes, swatchTime, payload);
 
 	ofstream myfile;
 	myfile.open(outputFile);
@@ -464,15 +472,19 @@ static int writeToFile_Byte(const char* outputFile, diceUnitHex_t* diceUnitP)
 
 	return 0;
 }
+#endif // !DICE_BYTE
 
 static void PrintSpeed(void)
 {
+	__int64 s64SpeedL = 0;
+	size_t   sCountOfMaxOpL = 0;
 	endTimer = chrono::steady_clock::now();
 	if (iCycles == cPRINT_SPEED_TH)
 	{
-		cout << "Operations per second: "
-			<< cNumberOfThreads * (1000 / chrono::duration_cast<chrono::milliseconds>(endTimer - startTimer).count())
-			<< " / s" << endl;
+		s64SpeedL = cNumberOfThreads * (1000 / chrono::duration_cast<chrono::milliseconds>(endTimer - startTimer).count());
+		sCountOfMaxOpL =(size_t) pow(2, u16Zeroes);
+		cout << "Operations per second: "<< s64SpeedL << " / s" << endl;
+		cout << "Estimated time for generation (max): "<< sCountOfMaxOpL / s64SpeedL << " s" << endl;
 	}
 	startTimer = chrono::steady_clock::now();
 }
@@ -513,12 +525,19 @@ static EprogramStates_t Program_GetConsole_Options(int argc, char* argv[])
 static void Program_Allocate_GPU(void)
 {
 	//Set zeroes
-	hexstr_to_char((uint8_t*)pZeroesL, aZerosL, cDICE_ZEROES_SIZE);
+	if (cPZeroes_256 != *pZeroesL)
+	{
+		hexstr_to_char((uint8_t*)pZeroesL,(uint8_t*)&u16Zeroes, cDICE_ZEROES_SIZE);
+	}
+	else
+	{
+		u16Zeroes = 256;
+	}
 
 	//Allocate memory on GPU
 	mCUDA_HANDLE_ERROR(cudaMalloc((void**)&pD_Payloads, cNumberOfThreads * sizeof(payload_t)));
-	mCUDA_HANDLE_ERROR(cudaMalloc((void**)&pD_Protos, cNumberOfThreads * sizeof(diceProtoHEX_t)));
-	mCUDA_HANDLE_ERROR(cudaMalloc((void**)&pD_ProtosShaHex, cNumberOfThreads * sizeof(hashProtoHex_t)));
+	mCUDA_HANDLE_ERROR(cudaMalloc((void**)&pD_Protos, cNumberOfThreads * sizeof(diceProto_t)));
+	mCUDA_HANDLE_ERROR(cudaMalloc((void**)&pD_ProtosShaHex, cNumberOfThreads * sizeof(hashProto_t)));
 	mCUDA_HANDLE_ERROR(cudaMalloc((void**)&pD_U16Zeroes, sizeof(uint16_t)));
 	mCUDA_HANDLE_ERROR(cudaMalloc((void**)&pD_U8Time, cDICE_SWATCH_TIME_SIZE));
 	mCUDA_HANDLE_ERROR(cudaMalloc((void**)&pD_ValidIDX, sizeof(int)));
@@ -531,7 +550,7 @@ static void Program_Cpy_Host_To_Device(void)
 
 	// Copy data from Host to Device
 	mCUDA_HANDLE_ERROR(cudaMemcpy(pD_U8Time, aU8Time, cDICE_SWATCH_TIME_SIZE, cudaMemcpyHostToDevice));
-	mCUDA_HANDLE_ERROR(cudaMemcpy(pD_U16Zeroes, aZerosL, sizeof(uint8_t), cudaMemcpyHostToDevice));
+	mCUDA_HANDLE_ERROR(cudaMemcpy(pD_U16Zeroes, &u16Zeroes, sizeof(uint16_t), cudaMemcpyHostToDevice));
 	mCUDA_HANDLE_ERROR(cudaMemset(pD_ValidIDX, cINVALID_IDX, sizeof(int)));
 
 	//Set const value
@@ -724,7 +743,6 @@ static void Program_Clean_Memory(void)
 	cudaFree(pD_ProtosShaHex);
 	cudaFree(pD_U16Zeroes);
 	cudaFree(pD_ValidIDX);
-	Free_CURAND();
 #ifndef OPTIMIZED
 	fprintf(stderr, "Free GPU Memory\n");
 #endif // !OPTIMIZED

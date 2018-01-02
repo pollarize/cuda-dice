@@ -2,9 +2,6 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <CudaCompile Include="kernel.cu" />
-    <CudaCompile Include="diceKernels.cu">
-      <Filter>Kernels</Filter>
-    </CudaCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Models">
@@ -25,9 +22,6 @@
     <Filter Include="Models\DiceCalculation">
       <UniqueIdentifier>{30df9e42-3ec4-4ebb-b6b8-88d5538df26a}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Kernels">
-      <UniqueIdentifier>{f3f84426-6973-4bf4-8b29-464d48e507ef}</UniqueIdentifier>
-    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="sha3Cuda.cuh">
@@ -41,9 +35,6 @@
     </ClInclude>
     <ClInclude Include="ValidationCuda.cuh">
       <Filter>Models\Validation</Filter>
-    </ClInclude>
-    <ClInclude Include="diceKernels.cuh">
-      <Filter>Kernels</Filter>
     </ClInclude>
     <ClInclude Include="DiceCalcCudaTypes.cuh">
       <Filter>Models\DiceCalculation</Filter>

@@ -46,7 +46,7 @@ __device__ curandState_t CurandStateHolder[cNumberOfThreads];
 
 __host__ void getPayload(uint8_t* buffer, int size)
 {
-	srand(time(NULL));
+	srand((unsigned int)time(NULL));
 
 	for (size_t i = 0; i < size; i++)
 	{
@@ -102,9 +102,4 @@ __global__ void gCUDA_Fill_Payload_Four_Byte(payload_t* buffer)
 		uint32_t u32RandL = curand(&CurandStateHolder[idx]);
 		memcpy(&(buffer[idx].payload[cDICE_SHA3_512_SIZE]), &u32RandL, cU32Size);
 	}
-}
-
-__host__ void Free_CURAND(void)
-{
-	cudaFree(CurandStateHolder);
 }

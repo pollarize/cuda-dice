@@ -1,0 +1,23 @@
+Hi All,
+Generally i want to update the status about SW development for DICE.
+
+Major Update:
+ - I have a Release candidate of DICE Unit calculator, which is separated application with
+	GPU Acceleration on  Nvidia CUDA.
+	
+ - I integrated CUDA Application in NodeJS (Infrastructure Application) and also 
+	i have separated builds for (Win/Mac/Linux) (x64,x86) but only for NodeJS Application at
+	the moment
+
+ - I've prepared a Functional tests on CUDA Application on my GPU (Nvidia GTX 1050), after 
+   statistical analysis for 100 sequential generations of units with 29 trailing zeroes (around 36.72s for 1
+   Unit on my GPU) i succeed experimentally to achieve 36.37s.
+   
+ - Average speed on my GPU is 14 619 989.33 Operations/s (Including 2 Hashes, 1 Random Number Generation and 1 Validation per Operation)
+   Raw Hashrate is around 32 MHash/s 
+
+Conclusions:
+  If we want to generate an DICE Unit with 44 trailing zeroes on my GPU, it will need 14 days to do that! The target speed for calculation of
+  that unit for 4hours will be around 1 000 000 000 Op/s or 70 Card Nvidia GTX 1050.
+  
+  As part of development i'm looking for someone with Nvidia Graphics Card to make some test.
