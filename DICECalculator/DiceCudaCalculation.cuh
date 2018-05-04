@@ -39,6 +39,17 @@
 #ifndef cNumberOfThreads
 #error "There is not defined count of used threads!"
 #endif
+
+#define cBufOut_General    ((uint8_t)0)
+#define cBufOut_Scrappting ((uint8_t)1)
+
+#define cBufOut_Size       ((uint8_t)2)
+
+#define mMinMarginFromGlobalTh(globalTh)    (uint16_t)((globalTh)-(uint16_t)10)
+//###############################################################################################################################
+// Local Data on GPU
+//###############################################################################################################################
+
 //###############################################################################################################################
 // External Function Prototypes
 //###############################################################################################################################
@@ -67,7 +78,7 @@ __global__ void gCUDA_SHA3_Random(payload_t* bufIn, diceProto_t* bufOut)
 	}
 }
 
-__global__ void gCUDA_SHA3_Proto(diceProto_t* bufIn, uint8_t* bufTime, hashProto_t* bufOut)
+__global__ void gCUDA_SHA3_Proto(diceProto_t* bufIn, uint8_t* bufTime, uint16_t* globalTh,hashProto_t* bufOut)
 {
 	int idx = (blockDim.x*blockIdx.x) + threadIdx.x;
 	if (idx < cNumberOfThreads)
@@ -84,7 +95,7 @@ __global__ void gCUDA_SHA3_Proto(diceProto_t* bufIn, uint8_t* bufTime, hashProto
 	}
 }
 
-__global__ void gCUDA_ValidateProtoHash(hashProto_t* bufIn, uint16_t* zeroes ,int* bufOut)
+__global__ void gCUDA_ValidateProtoHash(hashProto_t* bufIn, uint16_t* zeroes , uint16_t* globalTh, int* bufOut)
 {
 	int idx = (blockDim.x*blockIdx.x) + threadIdx.x;
 	if (idx < cNumberOfThreads)
@@ -93,14 +104,23 @@ __global__ void gCUDA_ValidateProtoHash(hashProto_t* bufIn, uint16_t* zeroes ,in
 		uint8_t aShaReturnL[64];
 		hexstr_to_char(bufIn[idx].hashProto, aShaReturnL,64);
 
-		bool bIsInvalidL = true;
+		bool localRes = true;
+		bool globalRes = true;
 
-		//Convert Hex String to Byte Array
-		validateHash(*zeroes, aShaReturnL, &bIsInvalidL);
+		validateHash(*zeroes, bufIn[idx].hashProto, &localRes);
+		validateHash(mMinMarginFromGlobalTh(*globalTh), bufIn[idx].hashProto, &globalRes);
 
-		if (true != bIsInvalidL)
+		if (true != localRes)
 		{
-			*bufOut = idx;
+			bufOut[cBufOut_General] = idx;
+		}
+		else if (true != globalRes)
+		{
+			bufOut[cBufOut_Scrappting] = idx;
+		}
+		else
+		{
+			//Invalid do NOTHING
 		}
 	}
 }
@@ -132,19 +152,28 @@ __global__ void gCUDA_SHA3_Proto_Byte(diceProto_t* bufIn, uint8_t* bufTime, hash
 	}
 }
 
-__global__ void gCUDA_ValidateProtoHash_Byte(hashProto_t* bufIn, uint16_t* zeroes, int* bufOut)
+__global__ void gCUDA_ValidateProtoHash_Byte(hashProto_t* bufIn, uint16_t* zeroes, uint16_t* globalTh, int* bufOut)
 {
 	int idx = (blockDim.x*blockIdx.x) + threadIdx.x;
 	if (idx < cNumberOfThreads)
 	{
-		bool bIsInvalidL = true;
+		bool localRes = true;
+		bool globalRes = true;
 
-		//Convert Hex String to Byte Array
-		validateHash(*zeroes, bufIn[idx].hashProto, &bIsInvalidL);
+		validateHash(*zeroes, bufIn[idx].hashProto, &localRes);
+		validateHash(mMinMarginFromGlobalTh(*globalTh), bufIn[idx].hashProto, &globalRes);
 
-		if (true != bIsInvalidL)
+		if (true != localRes)
 		{
-			*bufOut = idx;
+			bufOut[cBufOut_General] = idx;
+		}
+		else if (true != globalRes)
+		{
+			bufOut[cBufOut_Scrappting] = idx;
+		}
+		else
+		{
+			//Invalid do NOTHING
 		}
 	}
 }

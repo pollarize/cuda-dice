@@ -30,10 +30,8 @@
 #include <stdio.h> 
 #include <string>
 #include <time.h>
-#include <chrono>     
-#include <thread>         
+#include <chrono>           
 #include <fstream>
-#include <windows.h>
 #include <math.h>
 using namespace std;
 
@@ -45,9 +43,13 @@ using namespace std;
 #define OPTIMIZED
 #endif
 
+#ifndef DISPLAY_INFO
+#define DISPLAY_INFO
+#endif
+
 #define DICE_BYTE
 
-#define cNumberOfBlocks           (8192+256)
+#define cNumberOfBlocks           (4096+1024)
 #define cNumberOfThreadsPerBlock  (64)
 #define cSizeOfDataPerThread      (64)
 #define cNumberOfThreads          (cNumberOfBlocks*cNumberOfThreadsPerBlock)
@@ -63,7 +65,8 @@ using namespace std;
 #define CMD_ADRR_OP                ((uint8_t)2)
 #define CMD_ADRR_MIN               ((uint8_t)3)
 #define CMD_VALID_ZEROES           ((uint8_t)4)
-#define CMD_COUNT                  ((uint8_t)5)
+#define CMD_GLOBAL_TH              ((uint8_t)5)
+#define CMD_COUNT                  ((uint8_t)6)
 #endif
 
 //Index validation
@@ -78,6 +81,9 @@ using namespace std;
 
 //256 Trailin zeroes
 #define cPZeroes_256                ('0')
+
+//Size of new file name for scrapping
+#define cSizeOfStrappingName        ((uint16_t)512)
 
 #define mPRINT_TIME(func)                                                        \
 	startTimer = chrono::steady_clock::now();                                    \
@@ -127,6 +133,7 @@ typedef enum ProgramStates {
 	eProgram_Loop_CUDA_Validate,
 	eProgram_Loop_Host_Validate,
 	eProgram_Loop_Host_Display_Speed,
+	eProgram_Loop_Host_Scrapping,
 
 	//Prepare to exit
 	eProgram_CUDA_Cpy_Device_Memory,
@@ -162,8 +169,8 @@ static void Program_GetTime(void);
 static void Program_SHA3_Proto(void);
 static void Program_Validate(void);
 static void Program_Host_Validate(void);
-static void Program_Cpy_Device_To_Host(void);
-static void Program_Prepare_Check_Unit(void);
+static void Program_Cpy_Device_To_Host(uint8_t index);
+static void Program_Prepare_Check_Unit(uint8_t index);
 static void Program_Clean_Memory(void);
 static void Program_Exit(void);
 
@@ -179,7 +186,7 @@ static bool bIsProgramRunning = true;
 static uint8_t aU8Time[cDICE_SWATCH_TIME_SIZE];
 static auto startTimer = chrono::steady_clock::now();
 static auto endTimer = chrono::steady_clock::now();
-static diceUnit_t diceUnitValid;
+static diceUnit_t diceUnitValid[cBufOut_Size];
 static char stringBufferL[1024];
 static int iCycles = 0;
 
@@ -188,6 +195,7 @@ static const char* pOutputFile = 0;
 static const char* pAddrOpL = 0;
 static const char* pAddrMinL = 0;
 static const char* pZeroesL = 0;
+static const char* pGlobalThL = 0;
 
 //Set default Proto
 static diceProto_t diceProtoL;
@@ -201,8 +209,9 @@ static uint8_t aShaHexReturnL[cDICE_UNIT_SIZE];
 
 //Get zeroes from string
 static uint16_t u16Zeroes;
+static uint16_t u16GlobalTh;
 
-//Calculte whole execution time
+//Calculate whole execution time
 static auto progTimer = chrono::steady_clock::now();
 
 //Device-GPU
@@ -211,18 +220,19 @@ static uint8_t* pD_U8Time = 0;
 static diceProto_t* pD_Protos = 0;
 static hashProto_t* pD_ProtosShaHex = 0;
 static uint16_t* pD_U16Zeroes = 0;
+static uint16_t* pD_U16GlobalTh = 0;
 static int* pD_ValidIDX = 0;
 
 //Copy on Host
 #ifndef OPTIMIZED
 static payload_t h_Payloads[cNumberOfThreads];
-static hashProtoHex_t h_ProtosShaHex[cNumberOfThreads];
+static hashProto_t h_ProtosShaHex[cNumberOfThreads];
 static uint16_t h_U16Zeroes;
 #endif // !OPTIMIZED
 
 static diceProto_t h_Protos[cNumberOfThreads];
-static int h_ValidIDX = 0;
-
+static int h_ValidIDX[cBufOut_Size] = {cINVALID_IDX,cINVALID_IDX};
+static char aSrappingName[cSizeOfStrappingName];
 //###############################################################################################################################
 // Local Functions
 //###############################################################################################################################
@@ -320,13 +330,25 @@ int main(int argc, char* argv[])
 			Program_Host_Validate();
 			break;
 
+		case eProgram_Loop_Host_Scrapping:
+			//Set default next state
+			PStates = eProgram_Loop_CUDA_Fill_Random;
+
+			//Execute
+			Program_Cpy_Device_To_Host(cBufOut_Scrappting);
+			Program_Prepare_Check_Unit(cBufOut_Scrappting);
+			snprintf(aSrappingName, cSizeOfStrappingName, "%s%d%d%d%d_%d.dicescr", pOutputFile, aU8Time[0], aU8Time[1], aU8Time[2], aU8Time[3],iCycles);
+			writeToFile_Byte(aSrappingName, &diceUnitValid[cBufOut_Scrappting]);
+			break;
+
+
 			//Prepare to exit
 		case eProgram_CUDA_Cpy_Device_Memory:
 			//Set default next state
 			PStates = eProgram_Host_Prepare_Check_Unit;
 
 			//Execute
-			Program_Cpy_Device_To_Host();
+			Program_Cpy_Device_To_Host(cBufOut_General);
 			break;
 
 		case eProgram_Host_Prepare_Check_Unit:
@@ -334,7 +356,7 @@ int main(int argc, char* argv[])
 			PStates = eProgram_CUDA_Clean_Device_Memory;
 
 			//Execute
-			Program_Prepare_Check_Unit();
+			Program_Prepare_Check_Unit(cBufOut_General);
 			break;
 
 		case eProgram_CUDA_Clean_Device_Memory:
@@ -373,16 +395,17 @@ int main(int argc, char* argv[])
 
 static void DisplayHeader()
 {
+#ifdef DISPLAY_INFO
+
 	const int kb = 1024;
 	const int mb = kb * kb;
-	wcout << "NBody.GPU" << endl << "=========" << endl << endl;
-
-	wcout << "CUDA version:   v" << CUDART_VERSION << endl;
-
 	int devCount;
+
 	cudaGetDeviceCount(&devCount);
 	wcout << "CUDA Devices: " << endl << endl;
 
+	wcout << "NBody.GPU" << endl << "=========" << endl << endl;
+	wcout << "CUDA version:   v" << CUDART_VERSION << endl;
 
 	for (int i = 0; i < devCount; ++i)
 	{
@@ -403,6 +426,7 @@ static void DisplayHeader()
 		wcout << "  Max grid dimensions:  [ " << props.maxGridSize[0] << ", " << props.maxGridSize[1] << ", " << props.maxGridSize[2] << " ]" << endl;
 		wcout << endl;
 	}
+#endif // !DISPLAY_INFO
 
 	//Info for starting 
 	printf("CUDA DICE Calculator has been started\n");
@@ -476,12 +500,14 @@ static int writeToFile_Byte(const char* outputFile, diceUnit_t* diceUnitP)
 
 static void PrintSpeed(void)
 {
-	__int64 s64SpeedL = 0;
+	uint64_t s64SpeedL = 0;
 	size_t   sCountOfMaxOpL = 0;
 	endTimer = chrono::steady_clock::now();
 	if (iCycles == cPRINT_SPEED_TH)
 	{
-		s64SpeedL = cNumberOfThreads * (1000 / chrono::duration_cast<chrono::milliseconds>(endTimer - startTimer).count());
+		s64SpeedL = chrono::duration_cast<chrono::milliseconds> (endTimer - startTimer).count();
+		s64SpeedL = 1000 / s64SpeedL; //in seconds
+		s64SpeedL = s64SpeedL * cNumberOfThreads;
 		sCountOfMaxOpL =(size_t) pow(2, u16Zeroes);
 		cout << "Operations per second: "<< s64SpeedL << " / s" << endl;
 		cout << "Estimated time for generation (max): "<< sCountOfMaxOpL / s64SpeedL << " s" << endl;
@@ -513,6 +539,7 @@ static EprogramStates_t Program_GetConsole_Options(int argc, char* argv[])
 		pAddrOpL = argv[CMD_ADRR_OP];
 		pAddrMinL = argv[CMD_ADRR_MIN];
 		pZeroesL = argv[CMD_VALID_ZEROES];
+		pGlobalThL = argv[CMD_GLOBAL_TH];
 	}
 	else
 	{
@@ -528,10 +555,12 @@ static void Program_Allocate_GPU(void)
 	if (cPZeroes_256 != *pZeroesL)
 	{
 		hexstr_to_char((uint8_t*)pZeroesL,(uint8_t*)&u16Zeroes, cDICE_ZEROES_SIZE);
+		hexstr_to_char((uint8_t*)pGlobalThL, (uint8_t*)&u16GlobalTh, cDICE_ZEROES_SIZE);
 	}
 	else
 	{
 		u16Zeroes = 256;
+		u16GlobalTh = 256;
 	}
 
 	//Allocate memory on GPU
@@ -539,8 +568,9 @@ static void Program_Allocate_GPU(void)
 	mCUDA_HANDLE_ERROR(cudaMalloc((void**)&pD_Protos, cNumberOfThreads * sizeof(diceProto_t)));
 	mCUDA_HANDLE_ERROR(cudaMalloc((void**)&pD_ProtosShaHex, cNumberOfThreads * sizeof(hashProto_t)));
 	mCUDA_HANDLE_ERROR(cudaMalloc((void**)&pD_U16Zeroes, sizeof(uint16_t)));
+	mCUDA_HANDLE_ERROR(cudaMalloc((void**)&pD_U16GlobalTh, sizeof(uint16_t)));
 	mCUDA_HANDLE_ERROR(cudaMalloc((void**)&pD_U8Time, cDICE_SWATCH_TIME_SIZE));
-	mCUDA_HANDLE_ERROR(cudaMalloc((void**)&pD_ValidIDX, sizeof(int)));
+	mCUDA_HANDLE_ERROR(cudaMalloc((void**)&pD_ValidIDX, sizeof(int)*cBufOut_Size));
 }
 
 static void Program_Cpy_Host_To_Device(void)
@@ -551,7 +581,8 @@ static void Program_Cpy_Host_To_Device(void)
 	// Copy data from Host to Device
 	mCUDA_HANDLE_ERROR(cudaMemcpy(pD_U8Time, aU8Time, cDICE_SWATCH_TIME_SIZE, cudaMemcpyHostToDevice));
 	mCUDA_HANDLE_ERROR(cudaMemcpy(pD_U16Zeroes, &u16Zeroes, sizeof(uint16_t), cudaMemcpyHostToDevice));
-	mCUDA_HANDLE_ERROR(cudaMemset(pD_ValidIDX, cINVALID_IDX, sizeof(int)));
+	mCUDA_HANDLE_ERROR(cudaMemcpy(pD_U16GlobalTh, &u16GlobalTh, sizeof(uint16_t), cudaMemcpyHostToDevice));
+	mCUDA_HANDLE_ERROR(cudaMemset(pD_ValidIDX, cINVALID_IDX, sizeof(int)*cBufOut_Size));
 
 	//Set const value
 #ifndef DICE_BYTE
@@ -624,7 +655,7 @@ static void Program_SHA3_Random(void)
 	mCUDA_HANDLE_ERROR(cudaDeviceSynchronize());
 #ifndef OPTIMIZED
 	// Copy output vector from GPU buffer to host memory.
-	mCUDA_HANDLE_ERROR(cudaMemcpy(h_Protos, pD_Protos, cNumberOfThreads * sizeof(diceProtoHEX_t), cudaMemcpyDeviceToHost));
+	mCUDA_HANDLE_ERROR(cudaMemcpy(h_Protos, pD_Protos, cNumberOfThreads * sizeof(diceProto_t), cudaMemcpyDeviceToHost));
 #endif// !OPTIMIZED
 }
 
@@ -652,8 +683,8 @@ static void Program_SHA3_Proto(void)
 	mCUDA_HANDLE_ERROR(cudaDeviceSynchronize());
 #ifndef OPTIMIZED
 	//Copy output vector from GPU buffer to host memory.
-	mCUDA_HANDLE_ERROR(cudaMemcpy(h_Protos, pD_Protos, cNumberOfThreads * sizeof(diceProtoHEX_t), cudaMemcpyDeviceToHost));
-	mCUDA_HANDLE_ERROR(cudaMemcpy(h_ProtosShaHex, pD_ProtosShaHex, cNumberOfThreads * sizeof(hashProtoHex_t), cudaMemcpyDeviceToHost));
+	mCUDA_HANDLE_ERROR(cudaMemcpy(h_Protos, pD_Protos, cNumberOfThreads * sizeof(diceProto_t), cudaMemcpyDeviceToHost));
+	mCUDA_HANDLE_ERROR(cudaMemcpy(h_ProtosShaHex, pD_ProtosShaHex, cNumberOfThreads * sizeof(hashProto_t), cudaMemcpyDeviceToHost));
 #endif// !OPTIMIZED
 }
 
@@ -663,7 +694,7 @@ static void Program_Validate(void)
 #ifndef DICE_BYTE
 	gCUDA_ValidateProtoHash << < cNumberOfBlocks, cNumberOfThreadsPerBlock, cSizeOfDataPerThread >> > (pD_ProtosShaHex, pD_U16Zeroes, pD_ValidIDX);
 #else
-	gCUDA_ValidateProtoHash_Byte << < cNumberOfBlocks, cNumberOfThreadsPerBlock, cSizeOfDataPerThread >> > (pD_ProtosShaHex, pD_U16Zeroes, pD_ValidIDX);
+	gCUDA_ValidateProtoHash_Byte << < cNumberOfBlocks, cNumberOfThreadsPerBlock, cSizeOfDataPerThread >> > (pD_ProtosShaHex, pD_U16Zeroes, pD_U16GlobalTh, pD_ValidIDX);
 #endif // !DICE_BYTE
 
 	// Check for any errors launching the kernel
@@ -671,38 +702,47 @@ static void Program_Validate(void)
 	mCUDA_HANDLE_ERROR(cudaDeviceSynchronize());
 
 	//Copy output vector from GPU buffer to host memory.
-	mCUDA_HANDLE_ERROR(cudaMemcpy(&h_ValidIDX, pD_ValidIDX, sizeof(int), cudaMemcpyDeviceToHost));
-	mCUDA_HANDLE_ERROR(cudaMemset(pD_ValidIDX, cINVALID_IDX, sizeof(int)));
+	mCUDA_HANDLE_ERROR(cudaMemcpy(&h_ValidIDX, pD_ValidIDX, sizeof(int)*cBufOut_Size, cudaMemcpyDeviceToHost));
+	mCUDA_HANDLE_ERROR(cudaMemset(pD_ValidIDX, cINVALID_IDX, sizeof(int)*cBufOut_Size));
 }
 
 static void Program_Host_Validate(void)
 {
 	iCycles++;
-	if (cINVALID_IDX != h_ValidIDX)
+	if (cINVALID_IDX != h_ValidIDX[cBufOut_General])
 	{
 		PStates = eProgram_CUDA_Cpy_Device_Memory;
 	}
+	else if (cINVALID_IDX != h_ValidIDX[cBufOut_Scrappting])
+	{
+		PStates = eProgram_Loop_Host_Scrapping;
+	}
+	else
+	{
+		//Notging
+	}
+
 	//Print count of Operations per second
 	PrintSpeed();
 }
 
-static void Program_Cpy_Device_To_Host(void)
+static void Program_Cpy_Device_To_Host(uint8_t index)
 {
-	mCUDA_HANDLE_ERROR(cudaMemcpy(buf_PayloadL.payload, pD_Payloads[h_ValidIDX].payload, cDICE_PAYLOAD_SIZE, cudaMemcpyDeviceToHost));
+	mCUDA_HANDLE_ERROR(cudaMemcpy(buf_PayloadL.payload, pD_Payloads[h_ValidIDX[index]].payload, cDICE_PAYLOAD_SIZE, cudaMemcpyDeviceToHost));
 }
 
-static void Program_Prepare_Check_Unit(void)
+static void Program_Prepare_Check_Unit(uint8_t index)
 {
 	//Set Up Dice Unit
-	memcpy(diceUnitValid.addrOp, diceProtoL.addrOp, cDICE_ADDR_SIZE * cBYTE_TO_HEX);
-	memcpy(diceUnitValid.addrMin, diceProtoL.addrMin, cDICE_ADDR_SIZE * cBYTE_TO_HEX);
-	memcpy(diceUnitValid.validZeroes, diceProtoL.validZeroes, cDICE_ZEROES_SIZE * cBYTE_TO_HEX);
+	memcpy(diceUnitValid[index].addrOp, diceProtoL.addrOp, cDICE_ADDR_SIZE * cBYTE_TO_HEX);
+	memcpy(diceUnitValid[index].addrMin, diceProtoL.addrMin, cDICE_ADDR_SIZE * cBYTE_TO_HEX);
+	memcpy(diceUnitValid[index].validZeroes, diceProtoL.validZeroes, cDICE_ZEROES_SIZE * cBYTE_TO_HEX);
 #ifndef DICE_BYTE
 	dCUDA_Char_To_HexStr(aU8Time, cDICE_SWATCH_TIME_SIZE, diceUnitValid.swatchTime);
 	dCUDA_Char_To_HexStr(buf_PayloadL.payload, sizeof(payload_t), diceUnitValid.payload);
 #else
-	memcpy(diceUnitValid.swatchTime, aU8Time, cDICE_SWATCH_TIME_SIZE);
-	memcpy(diceUnitValid.payload, buf_PayloadL.payload, cDICE_PAYLOAD_SIZE);
+	memcpy(diceUnitValid[index].swatchTime, aU8Time, cDICE_SWATCH_TIME_SIZE);
+	memcpy(diceUnitValid[index].payload, buf_PayloadL.payload, cDICE_PAYLOAD_SIZE);
 #endif // !DICE_BYTE
 
 #ifndef OPTIMIZED 
@@ -742,6 +782,7 @@ static void Program_Clean_Memory(void)
 	cudaFree(pD_U8Time);
 	cudaFree(pD_ProtosShaHex);
 	cudaFree(pD_U16Zeroes);
+	cudaFree(pD_U16GlobalTh);
 	cudaFree(pD_ValidIDX);
 #ifndef OPTIMIZED
 	fprintf(stderr, "Free GPU Memory\n");
@@ -758,7 +799,7 @@ static void Program_Exit(void)
 
 #else
 	uint8_t aPrintReadyL[(cSHA3_512_SIZE*(cBYTE_TO_HEX + cBYTE_TO_HEX)) + 1];
-	dCUDA_Char_To_HexStr(h_ProtosShaHex[h_ValidIDX].hashProto, cDICE_SHA3_512_SIZE, aPrintReadyL);
+	dCUDA_Char_To_HexStr(h_ProtosShaHex[h_ValidIDX[cBufOut_General]].hashProto, cDICE_SHA3_512_SIZE, aPrintReadyL);
 	aPrintReadyL[(cSHA3_512_SIZE*(cBYTE_TO_HEX + cBYTE_TO_HEX))] = '\0';
 #endif// !DICE_BYTE
 	printf("Hash of Proto: %s\n", aPrintReadyL);
@@ -768,7 +809,7 @@ static void Program_Exit(void)
 #ifndef	DICE_BYTE
 	writeToFile(pOutputFile, &diceUnitValid);
 #else
-	writeToFile_Byte(pOutputFile, &diceUnitValid);
+	writeToFile_Byte(pOutputFile, &diceUnitValid[cBufOut_General]);
 #endif// !DICE_BYTE
 	bIsProgramRunning = false;
 }
