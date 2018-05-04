@@ -19,6 +19,7 @@ Global
 		{99AC0CFA-7465-4DC6-A51A-41EF87999661}.Release|x64.ActiveCfg = Release|x64
 		{99AC0CFA-7465-4DC6-A51A-41EF87999661}.Release|x64.Build.0 = Release|x64
 		{99AC0CFA-7465-4DC6-A51A-41EF87999661}.Release|x86.ActiveCfg = Release|x64
+		{99AC0CFA-7465-4DC6-A51A-41EF87999661}.Release|x86.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

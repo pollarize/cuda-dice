@@ -42,6 +42,7 @@
     <ClInclude Include="DiceCudaCalculation.cuh">
       <Filter>Models\DiceCalculation</Filter>
     </ClInclude>
+    <ClInclude Include="version.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="cudaUnit.json" />

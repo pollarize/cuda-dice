@@ -111,6 +111,7 @@ using namespace std;
 #include "ValidationCuda.cuh"
 #include "RandomGenCuda.cuh"
 #include "DiceCudaCalculation.cuh"
+#include "version.h"
 
 //###############################################################################################################################
 // Local Types
@@ -181,7 +182,7 @@ static void Program_Exit(void);
 //Host-CPU
 static cudaDeviceProp props;
 static cudaError_t cudaStatus;
-static EprogramStates_t PStates = eProgram_Init;
+static EprogramStates_t PStates = eProgram_Get_Console_Options;
 static bool bIsProgramRunning = true;
 static uint8_t aU8Time[cDICE_SWATCH_TIME_SIZE];
 static auto startTimer = chrono::steady_clock::now();
@@ -243,17 +244,17 @@ int main(int argc, char* argv[])
 	{
 		switch (PStates)
 		{
-		case eProgram_Init:
-			//Set default next state
-			PStates = eProgram_Get_Console_Options;
-
-			//Execute program
-			Program_Init();
-			break;
-
 		case eProgram_Get_Console_Options:
 			//Set default next state
 			PStates = Program_GetConsole_Options(argc, argv);
+			break;
+
+		case eProgram_Init:
+			//Set default next state
+			PStates = eProgram_CUDA_Allocate_Memory;
+
+			//Execute program
+			Program_Init();
 			break;
 
 		case eProgram_CUDA_Allocate_Memory:
@@ -381,9 +382,12 @@ int main(int argc, char* argv[])
 	//Print spent time in s
 	endTimer = chrono::steady_clock::now();
 
-	cout << "Time used: "
-		<< (chrono::duration_cast<chrono::seconds>(endTimer - progTimer).count())
-		<< " s" << endl;
+	if (argc == CMD_COUNT)
+	{
+		cout << "Time used: "
+			<< (chrono::duration_cast<chrono::seconds>(endTimer - progTimer).count())
+			<< " s" << endl;
+	}
 
 	//Exit from program
 	return 0;
@@ -489,10 +493,13 @@ static int writeToFile_Byte(const char* outputFile, diceUnit_t* diceUnitP)
 
 	iLenghtL = sprintf(stringBufferL, "{\"addrOperator\": \"%s\",\"addrMiner\" : \"%s\",\"validZeros\" : \"%s\",\"swatchTime\" : \"%s\",	\"payLoad\" : \"%s\" }", addrOp, addrMin, zeroes, swatchTime, payload);
 
-	ofstream myfile;
-	myfile.open(outputFile);
-	myfile.write(stringBufferL, iLenghtL);
-	myfile.close();
+	if (outputFile != nullptr) 
+	{
+		ofstream myfile;
+		myfile.open(outputFile);
+		myfile.write(stringBufferL, iLenghtL);
+		myfile.close();
+	}
 
 	return 0;
 }
@@ -532,7 +539,7 @@ static void Program_Init(void)
 
 static EprogramStates_t Program_GetConsole_Options(int argc, char* argv[])
 {
-	EprogramStates_t ProgramStateL = eProgram_CUDA_Allocate_Memory;
+	EprogramStates_t ProgramStateL = eProgram_Init;
 	if (argc == CMD_COUNT)
 	{
 		pOutputFile = argv[CMD_OUTPUT_FILE];
@@ -541,11 +548,20 @@ static EprogramStates_t Program_GetConsole_Options(int argc, char* argv[])
 		pZeroesL = argv[CMD_VALID_ZEROES];
 		pGlobalThL = argv[CMD_GLOBAL_TH];
 	}
+	else if (strcmp(argv[1],"-ver") != 0)
+	{
+		printf(
+"    Generate new DICE Unit. Values must to be in HEX! \n\
+    Usage : <application> <outputFilePath> <addrOfOperator> <addrOfMiner> <targetZeroes> <globalThreshold> \n\n");
+
+		ProgramStateL = eProgram_Exit;
+	}
 	else
 	{
-		printf("Invalid Arguments\n");
-		ProgramStateL = eProgram_CUDA_Clean_Device_Memory;
+		printf(pApplication_Version);
+		ProgramStateL = eProgram_Exit;
 	}
+
 	return ProgramStateL;
 }
 

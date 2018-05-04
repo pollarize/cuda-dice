@@ -110,6 +110,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClInclude Include="sha3Cuda.cuh" />
     <ClInclude Include="SwatchCuda.cuh" />
     <ClInclude Include="ValidationCuda.cuh" />
+    <ClInclude Include="version.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="cudaUnit.json" />
